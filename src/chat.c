@@ -16,6 +16,7 @@
 #include <sys/ioctl.h>
 #include <sys/time.h>
 #include <time.h>
+#include <poll.h>
 
 #define DEF_PORT 24242
 #define DEF_HOST "127.0.0.1"
@@ -24,16 +25,15 @@
 
 #define MAX_BUFFER_SIZE 32768
 #define MAX_NAME_SIZE 64
-// id (4 Byte) + size (4 Byte)+ name + delimeter (1 Byte = '@') + group + delimeter (1 Byte = '\0') 
+// id (4 Byte) + size (4 Byte)+ name + delimeter (1 Byte = '@') + group + delimeter (1 Byte = '\0')
 #define MAX_HEADER_SIZE 10+2*MAX_NAME_SIZE
 #define MAX_HISTORY_SIZE 64*(MAX_BUFFER_SIZE+MAX_HEADER_SIZE)
 
 #define MAX_MESSAGE_WIDTH 8/10
 #define MAX_WRAP_WORD 4/10
 #define MAX_RAND_IND 3
-#define CLIENT_CLOCK 100
-#define SERVER_CLOCK 100
-#define SERVER_STAT_INTERVAL 2000
+#define CLIENT_CLOCK 1000
+#define SERVER_CLOCK 1000
 #define MAX_SEARCH_TRY 5
 
 #define min(X, Y) ((X) < (Y) ? (X) : (Y))
@@ -43,22 +43,6 @@ struct termios oldterm;
 
 void resetTerm() {
 	tcsetattr(STDIN_FILENO, 0, &oldterm);
-}
-
-// struct to store the list of clients
-typedef struct client_list_s {
-	int sock;
-	unsigned int id;
-	struct client_list_s* next;
-} client_list_t;
-
-// dealocates memory and closes sockets
-void free_clist(client_list_t* list) {
-	if(list->next != NULL)
-		free_clist(list->next);
-	if(list->sock >= 0)
-		close(list->sock);
-	free(list);
 }
 
 // gets the size of the terminal (only width is actualy used)
@@ -148,7 +132,7 @@ int main(int argc, char** argv) {
 			} else
 				fprintf(stderr, "no group specified, option is ignored\n");
 		}  else if(strcmp("--help", argv[i]) == 0) /* output help */ {
-			fprintf(stderr, 
+			fprintf(stderr,
 				"Usage: chat [options]\n"
 				"\n"
 				"Options:\n"
@@ -196,6 +180,11 @@ int main(int argc, char** argv) {
 				perror("discovery socket couldn't be created");
 				exit(EXIT_FAILURE);
 			}
+			int enable = 1;
+			if (setsockopt(discovery_sock ,SOL_SOCKET, SO_REUSEADDR, &enable ,sizeof(enable)) == -1) {
+				perror("setsockopt error");
+				exit(EXIT_FAILURE);
+			}
 			// bind socket
 			struct sockaddr_in addr;
 			addr.sin_family = AF_INET;
@@ -221,6 +210,11 @@ int main(int argc, char** argv) {
 		tv.tv_sec = 2;
 		tv.tv_usec = 0;
 		if(setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv, sizeof tv) == -1) {
+			perror("setsockopt error");
+			exit(EXIT_FAILURE);
+		}
+		int enable = 1;
+		if (setsockopt(sock ,SOL_SOCKET, SO_REUSEADDR, &enable ,sizeof(enable)) == -1) {
 			perror("setsockopt error");
 			exit(EXIT_FAILURE);
 		}
@@ -254,29 +248,55 @@ int main(int argc, char** argv) {
 		}
 
 		// setup list to store all clients
-		client_list_t* clist = (client_list_t*)malloc(sizeof(client_list_t));
-		clist->next = NULL;
-		clist->sock = -1;
+		struct pollfd* listenfd = (struct pollfd*)malloc(sizeof(struct pollfd)*3);
+		listenfd[0].fd = STDIN_FILENO;
+		listenfd[0].events = POLLIN;
+		listenfd[1].fd = sock;
+		listenfd[1].events = POLLIN;
+		if(use_auto_dis) {
+			listenfd[2].fd = discovery_sock;
+			listenfd[2].events = POLLIN;
+		} else {
+			listenfd[2].fd = 0;
+			listenfd[2].events = 0;
+		}
+		unsigned int* cids = NULL;
 		unsigned int cid = 0;
+		int num_clients_con = 0;
 
 		int end = 0;
 		char buffer[MAX_BUFFER_SIZE+MAX_HEADER_SIZE];
 		int len;
 
 		// variables to keep track of some stats
-		int stat_inx = SERVER_STAT_INTERVAL;
 		int num_messg = 0;
 		int num_messg_hist = 0;
-		int num_clients_con = 0;
 		int start_time = time(NULL);
+		int loops = 0;
 
 		char history[MAX_HISTORY_SIZE];
 		unsigned int history_len = 0;
 
 		fprintf(stderr, "\x1b[?25l"); // hide cursor
 		while(!end) {
+			loops++;
+			int sec = time(NULL)-start_time;
+			int min = sec/60;
+			int hou = min/60;
+			int day = hou/24;
+			sec %= 60;
+			min %= 60;
+			hou %= 24;
+			fprintf(stderr, "\x1b[3M"); // clear previous output
+			fprintf(stderr, "uptime: %i days %i hours %i min. %i sec. (%i)\n", day, hou, min, sec, loops);
+			fprintf(stderr, "number of messages: %i (%i)\n", num_messg, num_messg_hist);
+			fprintf(stderr, "number of clients: %i (%i)\n", num_clients_con, cid);
+			fprintf(stderr, "\x1b[3A"); // go up 3 lines
+
+			poll(listenfd, 3+num_clients_con, SERVER_CLOCK);
+
 			// accept discovery messages
-			if(use_auto_dis) {
+			if(use_auto_dis && (listenfd[2].revents & POLLIN)) {
 				struct sockaddr_storage addr;
 				unsigned int addr_len = sizeof(addr);
 				len = recvfrom(discovery_sock, buffer, 2, MSG_DONTWAIT, (struct sockaddr*)&addr, &addr_len);
@@ -285,139 +305,125 @@ int main(int argc, char** argv) {
 					sendto(discovery_sock, buffer, 2, 0, (struct sockaddr*)&addr, addr_len);
 				}
 			}
-			// accept new client if there is one
-			int new_client = accept(sock, NULL, NULL);
-			if(new_client != -1) {
-				client_list_t* tmp = (client_list_t*)malloc(sizeof(client_list_t));
-				tmp->next = clist->next;
-				tmp->sock = new_client;
-				tmp->id = cid;
-				// send id to the client
-				buffer[0] = cid & 0xff;
-				buffer[1] = (cid >> 8) & 0xff;
-				buffer[2] = (cid >> 16) & 0xff;
-				buffer[3] = (cid >> 24) & 0xff;
-				len = 0;
-				while(len < 4) {
-					int tmp_len = send(new_client, buffer, 4-len, 0);
-					if(tmp_len == -1)
-						break;
-					else
-						len += tmp_len;
+
+			if(listenfd[1].revents & POLLIN) {
+				// accept new client if there is one
+				int new_client = accept(sock, NULL, NULL);
+				if(new_client != -1) {
+					// send id to the client
+					buffer[0] = cid & 0xff;
+					buffer[1] = (cid >> 8) & 0xff;
+					buffer[2] = (cid >> 16) & 0xff;
+					buffer[3] = (cid >> 24) & 0xff;
+					len = 0;
+					while(len < 4) {
+						int tmp_len = send(new_client, buffer, 4-len, 0);
+						if(tmp_len == -1)
+							break;
+						else
+							len += tmp_len;
+					}
+					// send history to the client
+					len = 0;
+					while(len < history_len) {
+						int tmp_len = send(new_client, history, history_len, 0);
+						if(tmp_len == -1)
+							break;
+						else
+							len += tmp_len;
+					}
+					num_clients_con++;
+					cids = realloc(cids, sizeof(unsigned int)*num_clients_con);
+					listenfd = realloc(listenfd, sizeof(struct pollfd)*(3+num_clients_con));
+					cids[num_clients_con-1] = cid;
+					cid++;
+					listenfd[3+num_clients_con-1].fd = new_client;
+					listenfd[3+num_clients_con-1].events = POLLIN;
 				}
-				// send history to the client
-				len = 0;
-				while(len < history_len) {
-					int tmp_len = send(new_client, history, history_len, 0);
-					if(tmp_len == -1)
-						break;
-					else
-						len += tmp_len;
-				}
-				cid++;
-				num_clients_con++;
-				clist->next = tmp;
 			}
 
 			// see if anyone wants to send anything
-			client_list_t* curr = clist;
-			while(curr != NULL && curr->next != NULL) {
-				client_list_t* next_curr = curr->next; // needed because the client might get deleted
-				len = recv(next_curr->sock, buffer+4, 4, MSG_DONTWAIT);
-				if(len >= 1) {
-					len += recv(next_curr->sock, buffer+4+len, 4-len, MSG_WAITALL);
-					if(len == 4) {
-						unsigned int len_read = (unsigned int)(unsigned char)buffer[4] | ((unsigned int)(unsigned char)buffer[5] << 8) |
-							((unsigned int)(unsigned char)buffer[6] << 16) | ((unsigned int)(unsigned char)buffer[7] << 24);
-						len += recv(next_curr->sock, buffer+4+len, len_read, MSG_WAITALL);
-						if(len == 4+len_read) {
-							// add the id to the message
-							buffer[0] = next_curr->id & 0xff;
-							buffer[1] = (next_curr->id >> 8) & 0xff;
-							buffer[2] = (next_curr->id >> 16) & 0xff;
-							buffer[3] = (next_curr->id >> 24) & 0xff;
-							len += 4;
-							// forward data to anyone
-							client_list_t* send_curr = clist;
-							while(send_curr->next != NULL) {
-								client_list_t* next_scurr = send_curr->next;
-								int len_send = 0;
-								while(len_send != len) {
-									int tmp_len = send(next_scurr->sock, buffer+len_send, len, 0);
-									if(tmp_len == -1) /* error */
-										break; // if the connection is closed it is removed at the next recv
-									else
-										len_send += tmp_len;
+			for(int i = 0; i < num_clients_con; i++) {
+				if(listenfd[3+i].revents & POLLIN) {
+					len = recv(listenfd[3+i].fd, buffer+4, 4, MSG_DONTWAIT);
+					if(len >= 1) {
+						len += recv(listenfd[3+i].fd, buffer+4+len, 4-len, MSG_WAITALL);
+						if(len == 4) {
+							unsigned int len_read = (unsigned int)(unsigned char)buffer[4] | ((unsigned int)(unsigned char)buffer[5] << 8) |
+								((unsigned int)(unsigned char)buffer[6] << 16) | ((unsigned int)(unsigned char)buffer[7] << 24);
+							len += recv(listenfd[3+i].fd, buffer+4+len, len_read, MSG_WAITALL);
+							if(len == 4+len_read) {
+								// add the id to the message
+								buffer[0] = cids[i] & 0xff;
+								buffer[1] = (cids[i] >> 8) & 0xff;
+								buffer[2] = (cids[i] >> 16) & 0xff;
+								buffer[3] = (cids[i] >> 24) & 0xff;
+								len += 4;
+								// forward data to anyone
+								for(int j = 0; j < num_clients_con; j++) {
+									int len_send = 0;
+									while(len_send != len) {
+										int tmp_len = send(listenfd[3+j].fd, buffer+len_send, len, 0);
+										if(tmp_len == -1) /* error */
+											break; // if the connection is closed it is removed at the next recv
+										else
+											len_send += tmp_len;
+									}
 								}
-								send_curr = send_curr->next;
+								// remove messages from history if needed
+								if(history_len >= len)
+									while(history_len+len > MAX_HISTORY_SIZE) {
+										unsigned int len_first = (unsigned int)(unsigned char)history[4] | ((unsigned int)(unsigned char)history[5] << 8) |
+											((unsigned int)(unsigned char)history[6] << 16) | ((unsigned int)(unsigned char)history[7] << 24);
+										history_len -= 8+len_first;
+										memmove(history, history+8+len_first, history_len);
+										num_messg_hist--;
+									}
+								num_messg++;
+								num_messg_hist++;
+								// add data to history
+								memcpy(history+history_len, buffer, len);
+								history_len+=len;
+							} else {
+								// disconnect client
+								num_clients_con--;
+								close(listenfd[3+i].fd);
+								memmove(listenfd+3+i, listenfd+3+i+1, sizeof(struct pollfd)*(num_clients_con-i));
+								memmove(cids+i, cids+3+i+1, sizeof(unsigned int)*(num_clients_con-i));
 							}
-							// remove messages from history if needed
-							if(history_len >= len)
-								while(history_len+len > MAX_HISTORY_SIZE) {
-									unsigned int len_first = (unsigned int)(unsigned char)history[4] | ((unsigned int)(unsigned char)history[5] << 8) |
-										((unsigned int)(unsigned char)history[6] << 16) | ((unsigned int)(unsigned char)history[7] << 24);
-									history_len -= 8+len_first;
-									memmove(history, history+8+len_first, history_len);
-									num_messg_hist--;
-								}
-							num_messg++;
-							num_messg_hist++;
-							// add data to history
-							memcpy(history+history_len, buffer, len);
-							history_len+=len;
 						} else {
-							// client disconected or is misbehavig
-							curr->next = next_curr->next;
-							close(next_curr->sock);
-							free(next_curr);
+							// disconnect client
 							num_clients_con--;
+							close(listenfd[3+i].fd);
+							memmove(listenfd+3+i, listenfd+3+i+1, sizeof(struct pollfd)*(num_clients_con-i));
+							memmove(cids+i, cids+3+i+1, sizeof(unsigned int)*(num_clients_con-i));
 						}
-					} else {
-						// client disconected or is misbehavig
-						curr->next = next_curr->next;
-						close(next_curr->sock);
-						free(next_curr);
+					} else if(len == 0) {
+						// disconnect client
 						num_clients_con--;
-					}
-				} else if(len == 0) {
-					// client disconected
-					curr->next = next_curr->next;
-					close(next_curr->sock);
-					free(next_curr);
-					num_clients_con--;
-				} /* else error (EAGAIN || EWOULDBLOCK) */
-				curr = curr->next;
+						close(listenfd[3+i].fd);
+						memmove(listenfd+3+i, listenfd+3+i+1, sizeof(struct pollfd)*(num_clients_con-i));
+						memmove(cids+i, cids+3+i+1, sizeof(unsigned int)*(num_clients_con-i));
+					} /* else error (EAGAIN || EWOULDBLOCK) */
+				}
 			}
 
-			// read stdin
-			len = read(STDIN_FILENO, buffer, MAX_BUFFER_SIZE);
-			if(len >= 1)
-				for(int i = 0; i < len; i++)
-					if(buffer[i] == 'q' || buffer[i] == 'Q' || buffer[i] == 3 /* <C-c> */) /* exit */ {
-						end = 1;
-						break;
-					}
-
-			if(stat_inx == SERVER_STAT_INTERVAL) {
-				int sec = time(NULL)-start_time;
-				int min = sec/60;
-				int hou = min/60;
-				int day = hou/24;
-				sec %= 60;
-				min %= 60;
-				hou %= 24;
-				fprintf(stderr, "\x1b[3M"); // clear previous output
-				fprintf(stderr, "uptime: %i days %i hours %i min. %i sec.\n", day, hou, min, sec);
-				fprintf(stderr, "number of messages: %i (%i)\n", num_messg, num_messg_hist);
-				fprintf(stderr, "number of clients: %i (%i)\n", num_clients_con, cid);
-				fprintf(stderr, "\x1b[3A"); // go up 3 lines
-				stat_inx = 0;
-			} else
-				stat_inx++;
-			usleep(SERVER_CLOCK);
+			if(listenfd[0].revents & POLLIN) {
+				// read stdin
+				len = read(STDIN_FILENO, buffer, MAX_BUFFER_SIZE);
+				if(len >= 1)
+					for(int i = 0; i < len; i++)
+						if(buffer[i] == 'q' || buffer[i] == 'Q' || buffer[i] == 3 /* <C-c> */) /* exit */ {
+							end = 1;
+							break;
+						}
+			}
 		}
 		fprintf(stderr, "\x1b[?25h\x1b[3M"); // show cursor and delete stat output
-		free_clist(clist);
+		for(int i = 0; i < num_clients_con; i++)
+			close(listenfd[3+i].fd);
+		free(listenfd);
+		free(cids);
 		if(use_auto_dis)
 			close(discovery_sock);
 		close(sock);
@@ -512,8 +518,14 @@ int main(int argc, char** argv) {
 			exit(EXIT_FAILURE);
 		}
 
+		struct pollfd listenfd[2];
+		listenfd[0].fd = STDIN_FILENO;
+		listenfd[0].events = POLLIN;
+		listenfd[1].fd = sock;
+		listenfd[1].events = POLLIN;
+		listenfd[1].revents = 0;
+
 		unsigned char end = 0;
-		unsigned char change = 1;
 		unsigned int width = 0;
 		unsigned int height = 0;
 
@@ -543,259 +555,159 @@ int main(int argc, char** argv) {
 			write(STDOUT_FILENO, "\0337\x1b[?47h\x1b[2J\x1b[999B", 18); // save cursor position, change to alternet buffer, clear the screen, go to the last line
 		write(STDOUT_FILENO, "\x1b[6 q\n", 6); // change cursor shape
 		while(!end) {
-			// read stdin
-			int len_in = read(STDIN_FILENO, tmp_in, MAX_BUFFER_SIZE);
-			if(len_in >= 1) {
-				for(int i = 0; i < len_in; i++) {
-					if(buff_len < MAX_BUFFER_SIZE) {
-						if(tmp_in[i] == '\b' || tmp_in[i] == '\x7f') /* delete */ {
-							if(cursor_pos > 0) {
-								int num_byte = 1;
-								if(use_utf8)
-									while(cursor_pos-num_byte > 0 && (buffer[cursor_pos-num_byte] & 0xc0) == 0x80) num_byte++;
-								cursor_pos -= num_byte;
-								buff_len -= num_byte;
-								memmove(buffer+cursor_pos, buffer+cursor_pos+num_byte, buff_len);
-								change = 1;
-							}
-						} else if(tmp_in[i] == '\t' && buff_len < MAX_BUFFER_SIZE) /* tab */ {
-							memmove(buffer+cursor_pos+1, buffer+cursor_pos, buff_len-cursor_pos);
-							buffer[cursor_pos] = ' ';
-							cursor_pos++;
-							buff_len++;
-							change = 1;
-						} else if(tmp_in[i] == 3 /* <C-c> */) {
-							end = 1;
-						} else if(tmp_in[i] == '\x1b') /* escape sequence */ {
-							i++;
-							if(tmp_in[i] == '[') {
-								i++;
-								if(tmp_in[i] == 'C' && cursor_pos < buff_len) /* right */ {
-									cursor_pos++;
-									if(use_utf8)
-										while(cursor_pos < buff_len && (buffer[cursor_pos] & 0xc0) == 0x80) cursor_pos++;
-									change = 1;
-								} else if(tmp_in[i] == 'D' && cursor_pos > 0) /* left */ {
-									cursor_pos--;
-									if(use_utf8)
-										while(cursor_pos > 0 && (buffer[cursor_pos] & 0xc0) == 0x80) cursor_pos--;
-									change = 1;
-								}
-							}
-						} else if(tmp_in[i] == '\n') /* enter => send */ {
-							if(buff_len > 0) {
-								// send message
-								len = strlen(name);
-								memcpy(tmp_out+4, name, len);
-								if(use_group) {
-									tmp_out[len+4] = '@';
-									len++;
-									int tmp_len = strlen(group);
-									memcpy(tmp_out+4+len, group, tmp_len);
-									len += tmp_len;
-								}
-								tmp_out[len+4] = 0;
-								len++;
-								memcpy(tmp_out+4+len, buffer, buff_len);
-								len += buff_len;
-
-								tmp_out[0] = len & 0xff;
-								tmp_out[1] = (len >> 8) & 0xff;
-								tmp_out[2] = (len >> 16) & 0xff;
-								tmp_out[3] = (len >> 24) & 0xff;
-
-								int len_send = 0;
-								while(len_send < len) {
-									int tmp_len = send(sock, tmp_out, len+4-len_send, 0);
-									if(tmp_len == -1)
-										break;
-									else
-										len_send += tmp_len;
-								}
-
-								buff_len = 0;
-								cursor_pos = 0;
-								change = 1;
-							}
-						} else {
-							tmp_out[0] = tmp_in[i];
-							int num_byte = 1;
-							int ch = tmp_in[i];
-							if((tmp_in[i] & 0x80) && use_utf8) {
-								while(tmp_in[i] & (0x80 >> num_byte)) num_byte++;
-								ch = (ch & (0xff >> (num_byte+1))) << ((num_byte-1)*6);
-								for(int j = num_byte-2; j >= 0; j--) {
-									i++;
-									tmp_out[num_byte-1-j] = tmp_in[i];
-									ch |= (tmp_in[i] & 0x3f) << j*6;
-								}
-							}
-							if((isprint(ch) || num_byte >= 2) && buff_len+num_byte <= MAX_BUFFER_SIZE) /* normal char and utf-8 (I have not found a way to check them for printability) */ {
-								memmove(buffer+cursor_pos+num_byte, buffer+cursor_pos, buff_len-cursor_pos);
-								memcpy(buffer+cursor_pos, tmp_out, num_byte);
-								cursor_pos += num_byte;
-								buff_len += num_byte;
-								change = 1;
-							}
-						}
-					}
-				}
-			}
-
-			get_termsize(&width, &height);
 
 			len = sprintf(tmp_out, "\x1b[?25l"); // hide cursor
 			len += sprintf(tmp_out+len, "\x1b[%iA\x1b[%iM", cursor_row+1, num_rows+1); // clear previous output
 
 			// get mesages
-			int len_recv = recv(sock, tmp_in, 8, MSG_DONTWAIT);
-			if(len_recv >= 1) {
-				len_recv += recv(sock, tmp_in+len_recv, 8-len_recv, MSG_WAITALL);
-				if(len_recv == 8) {
-					// id of the messege sender
-					unsigned int recvid = (unsigned int)(unsigned char)tmp_in[0] | ((unsigned int)(unsigned char)tmp_in[1] << 8) | ((unsigned int)tmp_in[2] << 16) | ((unsigned int)tmp_in[3] << 24);
-					// length of the message
-					unsigned int recvlen = (unsigned int)(unsigned char)tmp_in[4] | ((unsigned int)(unsigned char)tmp_in[5] << 8) | ((unsigned int)tmp_in[6] << 16) | ((unsigned int)tmp_in[7] << 24);
-					len_recv = recv(sock, tmp_in+8, recvlen, MSG_WAITALL);
-					if(len_recv == recvlen) {
-						len_recv = strlen(tmp_in+8); // length of the name+group
-						int group_pos = strfndchr(tmp_in+8, '@');
-						if(!use_group || (group_pos != -1 && strcmp(tmp_in+8+group_pos+1, group) == 0)) /* is the message in the right group */ {
-							if(use_group)
-								tmp_in[8+group_pos] = 0;
-							int msg_length = recvlen-len_recv-1;
+			if(listenfd[1].revents & POLLIN) {
+				int len_recv = recv(sock, tmp_in, 8, MSG_DONTWAIT);
+				if(len_recv >= 1) {
+					len_recv += recv(sock, tmp_in+len_recv, 8-len_recv, MSG_WAITALL);
+					if(len_recv == 8) {
+						// id of the messege sender
+						unsigned int recvid = (unsigned int)(unsigned char)tmp_in[0] | ((unsigned int)(unsigned char)tmp_in[1] << 8) | ((unsigned int)tmp_in[2] << 16) | ((unsigned int)tmp_in[3] << 24);
+						// length of the message
+						unsigned int recvlen = (unsigned int)(unsigned char)tmp_in[4] | ((unsigned int)(unsigned char)tmp_in[5] << 8) | ((unsigned int)tmp_in[6] << 16) | ((unsigned int)tmp_in[7] << 24);
+						len_recv = recv(sock, tmp_in+8, recvlen, MSG_WAITALL);
+						if(len_recv == recvlen) {
+							len_recv = strlen(tmp_in+8); // length of the name+group
+							int group_pos = strfndchr(tmp_in+8, '@');
+							if(!use_group || (group_pos != -1 && strcmp(tmp_in+8+group_pos+1, group) == 0)) /* is the message in the right group */ {
+								if(use_group)
+									tmp_in[8+group_pos] = 0;
+								int msg_length = recvlen-len_recv-1;
 
-							// print the sender if needed
-							if(last_cid != recvid) {
-								if(recvid == id || len_recv == 0)
-									len += sprintf(tmp_out+len, "\n");
-								else
-									len += sprintf(tmp_out+len, "\n%s:\n", tmp_in+8);
-							}
-
-							// determene the needed width to adjust the size of the message
-							int effective_width = 0;
-							int len_written = 0;
-							int in_row = 0;
-							int num_rows_msg = 1;
-							int last_word = 0;
-							while(len_written < msg_length) {
-								if(isblank(tmp_in[9+len_recv+len_written]))
-									last_word = 0;
-								if(num_rows_msg == 1 || in_row != 0 || !isblank(tmp_in[9+len_recv+len_written])) /* spaces after newline get ignored */ {
-									if(!isblank(tmp_in[9+len_recv+len_written]))
-										last_word++;
-									len_written++;
-									if(use_utf8)
-										while(len_written < msg_length && (tmp_in[9+len_recv+len_written] & 0xc0) == 0x80)
-											len_written++;
-									in_row++;
-									if(in_row >= width*MAX_MESSAGE_WIDTH) /* we need a new line */ {
-										if(ignore_breaking || last_word == 0 || last_word > width*MAX_WRAP_WORD || len_written == msg_length || isblank(tmp_in[9+len_recv+len_written])) /* don't worry about breaking words */ {
-											effective_width = in_row;
-											in_row = 0;
-										} else /*  avoid breaking the word */ {
-											if(effective_width < in_row-last_word)
-												effective_width = in_row-last_word;
-											in_row = last_word;
-										}
-										num_rows_msg++;
-									}
-								} else
-									len_written++;
-							}
-							if(effective_width < in_row)
-								effective_width = in_row;
-
-							// actualy print the message
-							int rand_ind = rand()%MAX_RAND_IND;
-							int rows_written = 0;
-							len_written = 0;
-							in_row = 0;
-							last_word = 0;
-							int last_word_byte = 0;
-
-							for(int i = 0; i < rand_ind; i++)
-								tmp_out[len++] = ' ';
-							if(recvid == id) {
-								if(num_rows_msg == 1)
-									if(use_utf8)
-										len += sprintf(tmp_out+len, "\x1b[34m◢\x1b[m\x1b[37;44m");
+								// print the sender if needed
+								if(last_cid != recvid) {
+									if(recvid == id || len_recv == 0)
+										len += sprintf(tmp_out+len, "\n");
 									else
-										len += sprintf(tmp_out+len, "\x1b[34m_\x1b[m\x1b[37;44m");
-								else
-									len += sprintf(tmp_out+len, " \x1b[37;44m");
-							} else
-								if(use_utf8)
-									len += sprintf(tmp_out+len, " \x1b[32m◥\x1b[m\x1b[30;42m");
-								else
-									len += sprintf(tmp_out+len, " \x1b[32m*\x1b[m\x1b[30;42m");
-
-							while(len_written < msg_length) {
-								if(isblank(tmp_in[9+len_recv+len_written])) {
-									last_word = 0;
-									last_word_byte = 0;
+										len += sprintf(tmp_out+len, "\n%s:\n", tmp_in+8);
 								}
-								if(rows_written == 0 || in_row != 0 || !isblank(tmp_in[9+len_recv+len_written])) /* spaces after newline get ignored */ {
-									if(!isblank(tmp_in[9+len_recv+len_written])) {
-										last_word++;
-										last_word_byte++;
-									}
-									tmp_out[len++] = tmp_in[9+len_recv+len_written++];
+
+								// determene the needed width to adjust the size of the message
+								int effective_width = 0;
+								int len_written = 0;
+								int in_row = 0;
+								int num_rows_msg = 1;
+								int last_word = 0;
+								while(len_written < msg_length) {
+									if(isblank(tmp_in[9+len_recv+len_written]))
+										last_word = 0;
+									if(num_rows_msg == 1 || in_row != 0 || !isblank(tmp_in[9+len_recv+len_written])) /* spaces after newline get ignored */ {
+										if(!isblank(tmp_in[9+len_recv+len_written]))
+											last_word++;
+										len_written++;
+										if(use_utf8)
+											while(len_written < msg_length && (tmp_in[9+len_recv+len_written] & 0xc0) == 0x80)
+												len_written++;
+										in_row++;
+										if(in_row >= width*MAX_MESSAGE_WIDTH) /* we need a new line */ {
+											if(ignore_breaking || last_word == 0 || last_word > width*MAX_WRAP_WORD || len_written == msg_length || isblank(tmp_in[9+len_recv+len_written])) /* don't worry about breaking words */ {
+												effective_width = in_row;
+												in_row = 0;
+											} else /*  avoid breaking the word */ {
+												if(effective_width < in_row-last_word)
+													effective_width = in_row-last_word;
+												in_row = last_word;
+											}
+											num_rows_msg++;
+										}
+									} else
+										len_written++;
+								}
+								if(effective_width < in_row)
+									effective_width = in_row;
+
+								// actualy print the message
+								int rand_ind = rand()%MAX_RAND_IND;
+								int rows_written = 0;
+								len_written = 0;
+								in_row = 0;
+								last_word = 0;
+								int last_word_byte = 0;
+
+								for(int i = 0; i < rand_ind; i++)
+									tmp_out[len++] = ' ';
+								if(recvid == id) {
+									if(num_rows_msg == 1)
+										if(use_utf8)
+											len += sprintf(tmp_out+len, "\x1b[34m◢\x1b[m\x1b[37;44m");
+										else
+											len += sprintf(tmp_out+len, "\x1b[34m_\x1b[m\x1b[37;44m");
+									else
+										len += sprintf(tmp_out+len, " \x1b[37;44m");
+								} else
 									if(use_utf8)
-										while(len_written < msg_length && (tmp_in[9+len_recv+len_written] & 0xc0) == 0x80) {
-											tmp_out[len++] = tmp_in[9+len_recv+len_written++];
+										len += sprintf(tmp_out+len, " \x1b[32m◥\x1b[m\x1b[30;42m");
+									else
+										len += sprintf(tmp_out+len, " \x1b[32m*\x1b[m\x1b[30;42m");
+
+								while(len_written < msg_length) {
+									if(isblank(tmp_in[9+len_recv+len_written])) {
+										last_word = 0;
+										last_word_byte = 0;
+									}
+									if(rows_written == 0 || in_row != 0 || !isblank(tmp_in[9+len_recv+len_written])) /* spaces after newline get ignored */ {
+										if(!isblank(tmp_in[9+len_recv+len_written])) {
+											last_word++;
 											last_word_byte++;
 										}
-									in_row++;
-									if(in_row >= effective_width && len_written != msg_length) /* we need a new line */ {
-										rows_written++;
-										char beg[64];
-										int len_beg = 0;
-										len_beg += sprintf(beg+len_beg, "\x1b[m\n");
-										for(int i = 0; i < rand_ind; i++)
-											beg[len_beg++] = ' ';
-										if(recvid == id) {
-											if(rows_written == num_rows_msg-1)
-												if(use_utf8)
-													len_beg += sprintf(beg+len_beg, "\x1b[34m◢\x1b[m\x1b[37;44m");
+										tmp_out[len++] = tmp_in[9+len_recv+len_written++];
+										if(use_utf8)
+											while(len_written < msg_length && (tmp_in[9+len_recv+len_written] & 0xc0) == 0x80) {
+												tmp_out[len++] = tmp_in[9+len_recv+len_written++];
+												last_word_byte++;
+											}
+										in_row++;
+										if(in_row >= effective_width && len_written != msg_length) /* we need a new line */ {
+											rows_written++;
+											char beg[64];
+											int len_beg = 0;
+											len_beg += sprintf(beg+len_beg, "\x1b[m\n");
+											for(int i = 0; i < rand_ind; i++)
+												beg[len_beg++] = ' ';
+											if(recvid == id) {
+												if(rows_written == num_rows_msg-1)
+													if(use_utf8)
+														len_beg += sprintf(beg+len_beg, "\x1b[34m◢\x1b[m\x1b[37;44m");
+													else
+														len_beg += sprintf(beg+len_beg, "\x1b[34m_\x1b[m\x1b[37;44m");
 												else
-													len_beg += sprintf(beg+len_beg, "\x1b[34m_\x1b[m\x1b[37;44m");
-											else
-												len_beg += sprintf(beg+len_beg, " \x1b[37;44m");
-										} else
-											len_beg += sprintf(beg+len_beg, "  \x1b[30;42m");
+													len_beg += sprintf(beg+len_beg, " \x1b[37;44m");
+											} else
+												len_beg += sprintf(beg+len_beg, "  \x1b[30;42m");
 
-										if(ignore_breaking || last_word == 0 || last_word > width*MAX_WRAP_WORD || isblank(tmp_in[9+len_recv+len_written])) /* don't wory about breaking words */ {
-											memcpy(tmp_out+len, beg, len_beg);
-											len += len_beg;
-											in_row = 0;
-										} else /* avoid breaking the word */ {
-											memmove(tmp_out+len-last_word_byte+last_word+len_beg, tmp_out+len-last_word_byte, last_word_byte);
-											for(int i = 0; i < last_word; i++)
-												tmp_out[len-last_word_byte+i] = ' ';
-											memcpy(tmp_out+len-last_word_byte+last_word, beg, len_beg);
-											len += last_word+len_beg;
-											in_row = last_word;
+											if(ignore_breaking || last_word == 0 || last_word > width*MAX_WRAP_WORD || isblank(tmp_in[9+len_recv+len_written])) /* don't wory about breaking words */ {
+												memcpy(tmp_out+len, beg, len_beg);
+												len += len_beg;
+												in_row = 0;
+											} else /* avoid breaking the word */ {
+												memmove(tmp_out+len-last_word_byte+last_word+len_beg, tmp_out+len-last_word_byte, last_word_byte);
+												for(int i = 0; i < last_word; i++)
+													tmp_out[len-last_word_byte+i] = ' ';
+												memcpy(tmp_out+len-last_word_byte+last_word, beg, len_beg);
+												len += last_word+len_beg;
+												in_row = last_word;
+											}
 										}
-									}
-								} else
-									len_written++;
-							}
-							for(int i = in_row; i < effective_width; i++)
-								tmp_out[len++] = ' ';
-							len += sprintf(tmp_out+len, "\x1b[m\n");
+									} else
+										len_written++;
+								}
+								for(int i = in_row; i < effective_width; i++)
+									tmp_out[len++] = ' ';
+								len += sprintf(tmp_out+len, "\x1b[m\n");
 
-							last_cid = recvid;
-							change = 1;
-						}
+								last_cid = recvid;
+							}
+						} // we disconnect at the next recv
 					} // we disconnect at the next recv
-				} // we disconnect at the next recv
-			} else if(len_recv == 0) {
-				// disconnected
-				len += sprintf(tmp_out+len, "connection closed.\n");
-				close(sock);
-				end = 1;
+				} else if(len_recv == 0) {
+					// disconnected
+					close(sock);
+					end = 1;
+				}
 			}
 
 			// print input
@@ -864,12 +776,108 @@ int main(int argc, char** argv) {
 			// show cursor
 			len += sprintf(tmp_out+len, "\x1b[?25h");
 			// if there was a change write to screen
-			if(change) {
-				write(STDOUT_FILENO, tmp_out, len);
-				change = 0;
+			write(STDOUT_FILENO, tmp_out, len);
+
+			poll(listenfd, 2, CLIENT_CLOCK);
+
+			// read stdin
+			if(listenfd[0].revents & POLLIN) {
+				int len_in = read(STDIN_FILENO, tmp_in, MAX_BUFFER_SIZE);
+				if(len_in >= 1) {
+					for(int i = 0; i < len_in; i++) {
+						if(buff_len < MAX_BUFFER_SIZE) {
+							if(tmp_in[i] == '\b' || tmp_in[i] == '\x7f') /* delete */ {
+								if(cursor_pos > 0) {
+									int num_byte = 1;
+									if(use_utf8)
+										while(cursor_pos-num_byte > 0 && (buffer[cursor_pos-num_byte] & 0xc0) == 0x80) num_byte++;
+									cursor_pos -= num_byte;
+									buff_len -= num_byte;
+									memmove(buffer+cursor_pos, buffer+cursor_pos+num_byte, buff_len);
+								}
+							} else if(tmp_in[i] == '\t' && buff_len < MAX_BUFFER_SIZE) /* tab */ {
+								memmove(buffer+cursor_pos+1, buffer+cursor_pos, buff_len-cursor_pos);
+								buffer[cursor_pos] = ' ';
+								cursor_pos++;
+								buff_len++;
+							} else if(tmp_in[i] == 3 /* <C-c> */) {
+								end = 1;
+							} else if(tmp_in[i] == '\x1b') /* escape sequence */ {
+								i++;
+								if(tmp_in[i] == '[') {
+									i++;
+									if(tmp_in[i] == 'C' && cursor_pos < buff_len) /* right */ {
+										cursor_pos++;
+										if(use_utf8)
+											while(cursor_pos < buff_len && (buffer[cursor_pos] & 0xc0) == 0x80) cursor_pos++;
+									} else if(tmp_in[i] == 'D' && cursor_pos > 0) /* left */ {
+										cursor_pos--;
+										if(use_utf8)
+											while(cursor_pos > 0 && (buffer[cursor_pos] & 0xc0) == 0x80) cursor_pos--;
+									}
+								}
+							} else if(tmp_in[i] == '\n') /* enter => send */ {
+								if(buff_len > 0) {
+									// send message
+									len = strlen(name);
+									memcpy(tmp_out+4, name, len);
+									if(use_group) {
+										tmp_out[len+4] = '@';
+										len++;
+										int tmp_len = strlen(group);
+										memcpy(tmp_out+4+len, group, tmp_len);
+										len += tmp_len;
+									}
+									tmp_out[len+4] = 0;
+									len++;
+									memcpy(tmp_out+4+len, buffer, buff_len);
+									len += buff_len;
+
+									tmp_out[0] = len & 0xff;
+									tmp_out[1] = (len >> 8) & 0xff;
+									tmp_out[2] = (len >> 16) & 0xff;
+									tmp_out[3] = (len >> 24) & 0xff;
+
+									int len_send = 0;
+									while(len_send < len) {
+										int tmp_len = send(sock, tmp_out, len+4-len_send, 0);
+										if(tmp_len == -1)
+											break;
+										else
+											len_send += tmp_len;
+									}
+
+									buff_len = 0;
+									cursor_pos = 0;
+								}
+							} else {
+								tmp_out[0] = tmp_in[i];
+								int num_byte = 1;
+								int ch = tmp_in[i];
+								if((tmp_in[i] & 0x80) && use_utf8) {
+									while(tmp_in[i] & (0x80 >> num_byte)) num_byte++;
+									ch = (ch & (0xff >> (num_byte+1))) << ((num_byte-1)*6);
+									for(int j = num_byte-2; j >= 0; j--) {
+										i++;
+										tmp_out[num_byte-1-j] = tmp_in[i];
+										ch |= (tmp_in[i] & 0x3f) << j*6;
+									}
+								}
+								if((isprint(ch) || num_byte >= 2) && buff_len+num_byte <= MAX_BUFFER_SIZE) /* normal char and utf-8 (I have not found a way to check them for printability) */ {
+									memmove(buffer+cursor_pos+num_byte, buffer+cursor_pos, buff_len-cursor_pos);
+									memcpy(buffer+cursor_pos, tmp_out, num_byte);
+									cursor_pos += num_byte;
+									buff_len += num_byte;
+								}
+							}
+						}
+					}
+				}
 			}
 
-			usleep(CLIENT_CLOCK);
+			get_termsize(&width, &height);
+
+
 		}
 		if(use_alternet)
 			write(STDOUT_FILENO, "\x1b[?47l\0338", 8);  // exit alternet buffer, restore cursor
