@@ -31,9 +31,9 @@
 
 #define MAX_INPUT_WIDTH 1
 #define MAX_MESSAGE_WIDTH 8/10
-#define MAX_WRAP_WORD 1/2
+#define MAX_WRAP_WORD 1/3
 #define MAX_RAND_IND 3
-#define CLIENT_CLOCK 1000
+#define CLIENT_CLOCK 10000
 #define SERVER_CLOCK 1000
 #define MAX_SEARCH_TRY 20
 #define TIMEOUT_SEC 2
@@ -50,9 +50,13 @@ void resetTerm() {
 // gets the size of the terminal (only width is actualy used)
 void get_termsize(unsigned int* width, unsigned int* height) {
 	struct winsize w;
-	ioctl(0, TIOCGWINSZ, &w);
-	*width = w.ws_col;
-	*height = w.ws_row;
+	if(ioctl(STDOUT_FILENO, TIOCGWINSZ, &w) == -1 || w.ws_col == 0) {
+		*width = ~0; // don't bother with the width
+		*height = ~0;
+	} else {
+		*width = w.ws_col;
+		*height = w.ws_row;
+	}
 }
 
 // find the first occurance of the given character in the string
@@ -65,6 +69,13 @@ int strfndchr(const char* str, char c) {
 		i++;
 	}
 	return -1;
+}
+
+int is_id_connected(unsigned int id, unsigned int ncid, unsigned int* cids) {
+	for(int i = 0; i < ncid; i++)
+		if(cids[i] == id)
+			return 1;
+	return 0;
 }
 
 int main(int argc, char** argv) {
@@ -274,7 +285,7 @@ int main(int argc, char** argv) {
 		}
 		unsigned int* cids = NULL;
 		unsigned int cid = 0;
-		int num_clients_con = 0;
+		unsigned int num_clients_con = 0;
 
 		int end = 0;
 		char buffer[MAX_BUFFER_SIZE+MAX_HEADER_SIZE];
@@ -328,11 +339,14 @@ int main(int argc, char** argv) {
 				// accept new client if there is one
 				int new_client = accept(sock, NULL, NULL);
 				if(new_client != -1) {
+					unsigned int id = cid;
+					while(is_id_connected(id, num_clients_con, cids)) id++;
+
 					// send id to the client
-					buffer[0] = cid & 0xff;
-					buffer[1] = (cid >> 8) & 0xff;
-					buffer[2] = (cid >> 16) & 0xff;
-					buffer[3] = (cid >> 24) & 0xff;
+					buffer[0] = id & 0xff;
+					buffer[1] = (id >> 8) & 0xff;
+					buffer[2] = (id >> 16) & 0xff;
+					buffer[3] = (id >> 24) & 0xff;
 					len = 0;
 					while(len < 4) {
 						int tmp_len = send(new_client, buffer, 4-len, 0);
@@ -353,7 +367,7 @@ int main(int argc, char** argv) {
 					num_clients_con++;
 					cids = realloc(cids, sizeof(unsigned int)*num_clients_con);
 					listenfd = realloc(listenfd, sizeof(struct pollfd)*(3+num_clients_con));
-					cids[num_clients_con-1] = cid;
+					cids[num_clients_con-1] = id;
 					cid++;
 					listenfd[3+num_clients_con-1].fd = new_client;
 					listenfd[3+num_clients_con-1].events = POLLIN;
@@ -512,7 +526,7 @@ int main(int argc, char** argv) {
 
 		// use udp_sock
 		if(use_udp && use_auto_dis) {
-			write(STDOUT_FILENO, "Looking for server...\n", 22);
+			fprintf(stderr, "Looking for server...\n");
 			struct sockaddr_in saddr;
 			saddr.sin_family = AF_INET;
 			saddr.sin_addr.s_addr = htonl(INADDR_BROADCAST);
@@ -858,7 +872,7 @@ int main(int argc, char** argv) {
 								buffer[cursor_pos] = ' ';
 								cursor_pos++;
 								buff_len++;
-							} else if(tmp_in[i] == 3 /* <C-c> */) {
+							} else if(tmp_in[i] == 3 /* <C-c> */ || tmp_in[i] == 4 /* <C-D> */) {
 								end = 1;
 							} else if(tmp_in[i] == '\x1b') /* escape sequence */ {
 								i++;
