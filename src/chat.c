@@ -23,7 +23,7 @@
 #define DEF_GROUP "default"
 #define DEF_NAME getlogin()
 
-#define MAX_BUFFER_SIZE 32768
+#define MAX_BUFFER_SIZE 64000
 #define MAX_NAME_SIZE 64
 // id (4 Byte) + size (4 Byte)+ name + delimeter (1 Byte = '@') + group + delimeter (1 Byte = '\0')
 #define MAX_HEADER_SIZE 10+2*MAX_NAME_SIZE
@@ -35,7 +35,7 @@
 #define MAX_RAND_IND 3
 #define CLIENT_CLOCK 1000
 #define SERVER_CLOCK 1000
-#define MAX_SEARCH_TRY 5
+#define MAX_SEARCH_TRY 20
 #define TIMEOUT_SEC 2
 
 #define min(X, Y) ((X) < (Y) ? (X) : (Y))
@@ -312,7 +312,7 @@ int main(int argc, char** argv) {
 				struct sockaddr_storage addr;
 				unsigned int addr_len = sizeof(addr);
 				len = recvfrom(udp_sock, buffer, MAX_BUFFER_SIZE, MSG_DONTWAIT, (struct sockaddr*)&addr, &addr_len);
-				if(use_auto_dis && len == 2 && buffer[0] == 'H' && buffer[1] == 'I') /* if we get a package we return the recved date */ {
+				if(use_auto_dis && len == 2 && buffer[0] == 'H' && buffer[1] == 'I') /* if we get a discovery package we return ok */ {
 					buffer[0] = 'O';
 					buffer[1] = 'K';
 					sendto(udp_sock, buffer, 2, 0, (struct sockaddr*)&addr, addr_len);
@@ -566,7 +566,6 @@ int main(int argc, char** argv) {
 		unsigned int cursor_pos = 0;
 
 		int cursor_row = 0;
-		int num_rows = 0;
 
 		// get the id
 		unsigned int id;
@@ -586,7 +585,7 @@ int main(int argc, char** argv) {
 		write(STDOUT_FILENO, "\x1b[6 q\n", 6); // change cursor shape
 		while(!end) {
 			len = sprintf(tmp_out, "\x1b[?25l"); // hide cursor
-			len += sprintf(tmp_out+len, "\x1b[%iA\x1b[%iM", cursor_row+1, num_rows+1); // clear previous output
+			len += sprintf(tmp_out+len, "\x1b[%iA\r\x1b[J", cursor_row+1); // clear previous output
 
 			// get mesages
 			if(listenfd[1].revents & POLLIN) {
@@ -751,7 +750,7 @@ int main(int argc, char** argv) {
 			len += sprintf(tmp_out+len, "\n> ");
 			int print_len = 0;
 			int in_row = 2;
-			num_rows = 1;
+			int num_rows = 1;
 			int cursor_len = 0;
 			int cursor_in_row = 2;
 			int cursor_in_row_tmp = 2;
@@ -939,9 +938,9 @@ int main(int argc, char** argv) {
 
 		}
 		if(use_alternet)
-			write(STDOUT_FILENO, "\x1b[?47l\0338", 8);  // exit alternet buffer, restore cursor
+			write(STDOUT_FILENO, "\x1b[2J\x1b[?47l\0338", 12);  // exit alternet buffer, restore cursor
 		else
-			fprintf(stdout, "\x1b[%iA\x1b[%iM\n", cursor_row+1, num_rows+1); // clear previous output
+			fprintf(stdout, "\x1b[%iA\r\x1b[J\n", cursor_row+1); // clear previous output
 	
 		if(use_udp)
 			close(udp_sock);
