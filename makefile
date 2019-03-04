@@ -1,7 +1,7 @@
 TARGET=chat
 OBJECTS=$(BUILD)/chat.o
 LIBS=
-ARGS=-g -Wall
+ARGS=-O3 -Wall
 CLEAN=rm -f
 CC=gcc
 SRC=./src
