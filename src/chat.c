@@ -143,11 +143,11 @@ int main(int argc, char** argv) {
 				"  -h, --ip IP            set the servers ip (def: '127.0.0.1')\n"
 				"  -p, --port PORT        select the servers port (def: '24242')\n"
 				"  -s, --server           make this a server\n"
+				"  -H, --auto-discovery   use automatic discovery\n"
 				"\n"
 				"Options for clients:\n"
 				"  -n, --name NAME        set the name (def: username)\n"
 				"  -G, --no-group         do not use the group feature\n"
-				"  -H, --auto-discovery   use automatic discovery\n"
 				"  -B, --ignore-break     do not worry about breaking words\n"
 				"  -U, --no-utf-8         avoid any utf-8 I/O processing\n"
 				"  -g, --group GROUP      set the group (def: 'default')\n"
@@ -915,7 +915,7 @@ int main(int argc, char** argv) {
 								if((tmp_in[i] & 0x80) && use_utf8) {
 									while(tmp_in[i] & (0x80 >> num_byte)) num_byte++;
 									ch = (ch & (0xff >> (num_byte+1))) << ((num_byte-1)*6);
-									for(int j = num_byte-2; j >= 0; j--) {
+									for(int j = num_byte-2; j >= 0 && i+1 < len_in && (tmp_in[i+1] & 0xc0) == 0x80; j--) /* read every byte as long as we dont hit the end and it is a actual continuation byte */ {
 										i++;
 										tmp_out[num_byte-1-j] = tmp_in[i];
 										ch |= (tmp_in[i] & 0x3f) << j*6;
