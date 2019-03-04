@@ -29,12 +29,14 @@
 #define MAX_HEADER_SIZE 10+2*MAX_NAME_SIZE
 #define MAX_HISTORY_SIZE 64*(MAX_BUFFER_SIZE+MAX_HEADER_SIZE)
 
+#define MAX_INPUT_WIDTH 1
 #define MAX_MESSAGE_WIDTH 8/10
-#define MAX_WRAP_WORD 4/10
+#define MAX_WRAP_WORD 1/2
 #define MAX_RAND_IND 3
 #define CLIENT_CLOCK 1000
 #define SERVER_CLOCK 1000
 #define MAX_SEARCH_TRY 5
+#define TIMEOUT_SEC 2
 
 #define min(X, Y) ((X) < (Y) ? (X) : (Y))
 
@@ -74,6 +76,7 @@ int main(int argc, char** argv) {
 	unsigned char use_group = 1;
 	unsigned char use_utf8 = 1;
 	unsigned char use_auto_dis = 0;
+	unsigned char use_udp = 0;
 	unsigned char ignore_breaking = 0;
 	const char* group = DEF_GROUP;
 	const char* name = DEF_NAME;
@@ -105,6 +108,7 @@ int main(int argc, char** argv) {
 			use_group = 0;
 		} else if(strcmp("-H", argv[i]) == 0 || strcasecmp("--auto-discovery", argv[i]) == 0) /* use automatic host discovery */ {
 			use_auto_dis = 1;
+			use_udp = 1;
 		}  else if(strcmp("-B", argv[i]) == 0 || strcasecmp("--ignore-break", argv[i]) == 0) /* use automatic host discovery */ {
 			ignore_breaking = 1;
 		} else if(strcmp("-U", argv[i]) == 0 || strcasecmp("--no-utf-8", argv[i]) == 0) /* don't use utf-8 */ {
@@ -133,7 +137,7 @@ int main(int argc, char** argv) {
 				fprintf(stderr, "no group specified, option is ignored\n");
 		}  else if(strcmp("--help", argv[i]) == 0) /* output help */ {
 			fprintf(stderr,
-				"Usage: chat [options]\n"
+				"Usage: %s [options]\n"
 				"\n"
 				"Options:\n"
 				"  -h, --ip IP            set the servers ip (def: '127.0.0.1')\n"
@@ -141,7 +145,7 @@ int main(int argc, char** argv) {
 				"  -s, --server           make this a server\n"
 				"\n"
 				"Options for clients:\n"
-				"  -n, --name NAME        set the name (def: '')\n"
+				"  -n, --name NAME        set the name (def: username)\n"
 				"  -G, --no-group         do not use the group feature\n"
 				"  -H, --auto-discovery   use automatic discovery\n"
 				"  -B, --ignore-break     do not worry about breaking words\n"
@@ -152,7 +156,7 @@ int main(int argc, char** argv) {
 				"\n"
 				"* This may cause problems if the terminal\n"
 				"  does not support certain features\n"
-			);
+			, argv[0]);
 			exit(EXIT_SUCCESS);
 		} else {
 			fprintf(stderr, "unknown option '%s', option is ignored\n", argv[i]);
@@ -173,15 +177,23 @@ int main(int argc, char** argv) {
 	signal(SIGPIPE, SIG_IGN); // an error on send will cause a SIGPIPE
 	if(is_server) {
 		// create discovery socket if needed
-		int discovery_sock;
-		if(use_auto_dis) {
-			discovery_sock = socket(AF_INET, SOCK_DGRAM, 0);
-			if(discovery_sock == -1) {
-				perror("discovery socket couldn't be created");
+		int udp_sock;
+		if(use_udp) {
+			udp_sock = socket(AF_INET, SOCK_DGRAM, 0);
+			if(udp_sock == -1) {
+				perror("udp socket couldn't be created");
+				exit(EXIT_FAILURE);
+			}
+			// set timeout
+			struct timeval tv;
+			tv.tv_sec = TIMEOUT_SEC;
+			tv.tv_usec = 0;
+			if(setsockopt(udp_sock, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv, sizeof tv) == -1) {
+				perror("setsockopt error");
 				exit(EXIT_FAILURE);
 			}
 			int enable = 1;
-			if (setsockopt(discovery_sock ,SOL_SOCKET, SO_REUSEADDR, &enable ,sizeof(enable)) == -1) {
+			if (setsockopt(udp_sock ,SOL_SOCKET, SO_REUSEADDR, &enable ,sizeof(enable)) == -1) {
 				perror("setsockopt error");
 				exit(EXIT_FAILURE);
 			}
@@ -193,8 +205,8 @@ int main(int argc, char** argv) {
 			else
 				addr.sin_addr.s_addr = inet_addr(host);
 			addr.sin_port = htons(port);
-			if(bind(discovery_sock, (struct sockaddr*)&addr, sizeof(addr)) == -1) {
-				perror("couldn't bind discovery socket");
+			if(bind(udp_sock, (struct sockaddr*)&addr, sizeof(addr)) == -1) {
+				perror("couldn't bind udp socket");
 				exit(EXIT_FAILURE);
 			}
 		}
@@ -207,7 +219,7 @@ int main(int argc, char** argv) {
 		}
 		// set timeout
 		struct timeval tv;
-		tv.tv_sec = 2;
+		tv.tv_sec = TIMEOUT_SEC;
 		tv.tv_usec = 0;
 		if(setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv, sizeof tv) == -1) {
 			perror("setsockopt error");
@@ -254,7 +266,7 @@ int main(int argc, char** argv) {
 		listenfd[1].fd = sock;
 		listenfd[1].events = POLLIN;
 		if(use_auto_dis) {
-			listenfd[2].fd = discovery_sock;
+			listenfd[2].fd = udp_sock;
 			listenfd[2].events = POLLIN;
 		} else {
 			listenfd[2].fd = 0;
@@ -296,13 +308,19 @@ int main(int argc, char** argv) {
 			poll(listenfd, 3+num_clients_con, SERVER_CLOCK);
 
 			// accept discovery messages
-			if(use_auto_dis && (listenfd[2].revents & POLLIN)) {
+			if(use_udp && (listenfd[2].revents & POLLIN)) {
 				struct sockaddr_storage addr;
 				unsigned int addr_len = sizeof(addr);
-				len = recvfrom(discovery_sock, buffer, 2, MSG_DONTWAIT, (struct sockaddr*)&addr, &addr_len);
-				if(len == 2 && buffer[0] == '4' && buffer[1] == '_') /* if we get a package we return the recved date */ {
-					buffer[1] = '2';
-					sendto(discovery_sock, buffer, 2, 0, (struct sockaddr*)&addr, addr_len);
+				len = recvfrom(udp_sock, buffer, MAX_BUFFER_SIZE, MSG_DONTWAIT, (struct sockaddr*)&addr, &addr_len);
+				if(use_auto_dis && len == 2 && buffer[0] == 'H' && buffer[1] == 'I') /* if we get a package we return the recved date */ {
+					buffer[0] = 'O';
+					buffer[1] = 'K';
+					sendto(udp_sock, buffer, 2, 0, (struct sockaddr*)&addr, addr_len);
+				} else {
+					buffer[0] = 'E';
+					buffer[1] = 'R';
+					buffer[2] = 'R';
+					sendto(udp_sock, buffer, 3, 0, (struct sockaddr*)&addr, addr_len);
 				}
 			}
 
@@ -424,10 +442,43 @@ int main(int argc, char** argv) {
 			close(listenfd[3+i].fd);
 		free(listenfd);
 		free(cids);
-		if(use_auto_dis)
-			close(discovery_sock);
+		if(use_udp)
+			close(udp_sock);
 		close(sock);
 	} else {
+		int udp_sock;
+		// create udp_sock
+		if(use_udp) {
+			udp_sock = socket(AF_INET, SOCK_DGRAM, 0);
+			if(udp_sock == -1) {
+				perror("udp socket couldn't be created");
+				exit(EXIT_FAILURE);
+			}
+			// set timeout
+			struct timeval tv;
+			tv.tv_sec = TIMEOUT_SEC;
+			tv.tv_usec = 0;
+			if(setsockopt(udp_sock, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv, sizeof tv) == -1) {
+				perror("udp timeout setsockopt error");
+				exit(EXIT_FAILURE);
+			}
+			// enable broadcast
+			int broadcastEnable=1;
+			if(setsockopt(udp_sock, SOL_SOCKET, SO_BROADCAST, &broadcastEnable, sizeof(broadcastEnable))) {
+				perror("udp broadcast setsockopt error");
+				exit(EXIT_FAILURE);
+			}
+			// bind socket
+			struct sockaddr_in saddr;
+			saddr.sin_family = AF_INET;
+			saddr.sin_addr.s_addr = INADDR_ANY;
+			saddr.sin_port = htons(0);
+			if(bind(udp_sock, (struct sockaddr*)&saddr, sizeof(saddr)) == -1) {
+				perror("couldn't bind udp socket");
+				exit(EXIT_FAILURE);
+			}
+		}
+		
 		// create socket
 		int sock = socket(AF_INET, SOCK_STREAM, 0);
 		if(sock == -1) {
@@ -436,7 +487,7 @@ int main(int argc, char** argv) {
 		}
 		// set timeout
 		struct timeval tv;
-		tv.tv_sec = 2;
+		tv.tv_sec = TIMEOUT_SEC;
 		tv.tv_usec = 0;
 		setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv, sizeof tv);
 
@@ -446,55 +497,34 @@ int main(int argc, char** argv) {
 		// filled by discovery
 		struct sockaddr_storage raddr;
 		// given by '-h' or the default
+		
 		struct sockaddr_in addr;
 		addr.sin_family = AF_INET;
-		addr.sin_addr.s_addr = inet_addr(host);
+		struct hostent* hoste = gethostbyname(host);
+		if(hoste == NULL || hoste->h_addr_list[0] == NULL) {
+			perror("couldn't find the specified ip address");
+			exit(EXIT_FAILURE);
+		}
+		addr.sin_addr = *(((struct in_addr**)hoste->h_addr_list)[0]);
 		addr.sin_port = htons(port);
 		server_addr = (struct sockaddr*)&addr;
 		server_addr_len = sizeof(addr);
 
-		// use discovery_sock
-		if(use_auto_dis) {
-			int discovery_sock = socket(AF_INET, SOCK_DGRAM, 0);
-			if(discovery_sock == -1) {
-				perror("discovery socket couldn't be created");
-				exit(EXIT_FAILURE);
-			}
-			// set timeout
-			struct timeval tv;
-			tv.tv_sec = 1;
-			tv.tv_usec = 0;
-			if(setsockopt(discovery_sock, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv, sizeof tv) == -1) {
-				perror("discovery timeout setsockopt error");
-				exit(EXIT_FAILURE);
-			}
-			// enable broadcast
-			int broadcastEnable=1;
-			if(setsockopt(discovery_sock, SOL_SOCKET, SO_BROADCAST, &broadcastEnable, sizeof(broadcastEnable))) {
-				perror("discovery broadcast setsockopt error");
-				exit(EXIT_FAILURE);
-			}
-			// bind socket
-			struct sockaddr_in saddr;
-			saddr.sin_family = AF_INET;
-			saddr.sin_addr.s_addr = INADDR_ANY;
-			saddr.sin_port = htons(0);
-			if(bind(discovery_sock, (struct sockaddr*)&saddr, sizeof(saddr)) == -1) {
-				perror("couldn't bind discovery socket");
-				exit(EXIT_FAILURE);
-			}
+		// use udp_sock
+		if(use_udp && use_auto_dis) {
 			write(STDOUT_FILENO, "Looking for server...\n", 22);
+			struct sockaddr_in saddr;
 			saddr.sin_family = AF_INET;
 			saddr.sin_addr.s_addr = htonl(INADDR_BROADCAST);
 			saddr.sin_port = htons(port);
 			int i = MAX_SEARCH_TRY;
 			while(i) {
-				char buffer[2] = {'4', '_'};
-				int len = sendto(discovery_sock, buffer, 2, 0, (struct sockaddr*)&saddr, sizeof(saddr));
+				char buffer[MAX_BUFFER_SIZE] = "HI";
+				int len = sendto(udp_sock, buffer, 2, 0, (struct sockaddr*)&saddr, sizeof(saddr));
 				if(len == 2) {
 					unsigned int raddr_len = sizeof(raddr);
-					len = recvfrom(discovery_sock, buffer, 2, 0, (struct sockaddr*)&raddr, &raddr_len);
-					if(len == 2 && buffer[0] == '4' && buffer[1] == '2') {
+					len = recvfrom(udp_sock, buffer, MAX_BUFFER_SIZE, 0, (struct sockaddr*)&raddr, &raddr_len);
+					if(len == 2 && buffer[0] == 'O' && buffer[1] == 'K') {
 						fprintf(stderr, "\x1b[A\x1b[M");
 						server_addr = (struct sockaddr*)&raddr;
 						server_addr_len = raddr_len;
@@ -507,7 +537,6 @@ int main(int argc, char** argv) {
 				}
 				i--;
 			}
-			close(discovery_sock);
 			if(def_host)
 				fprintf(stderr, "couldn't find a server, trying defaults\n");
 		}
@@ -528,6 +557,7 @@ int main(int argc, char** argv) {
 		unsigned char end = 0;
 		unsigned int width = 0;
 		unsigned int height = 0;
+
 
 		char tmp_out[3*MAX_BUFFER_SIZE];
 		char tmp_in[MAX_BUFFER_SIZE+MAX_HEADER_SIZE];
@@ -555,7 +585,6 @@ int main(int argc, char** argv) {
 			write(STDOUT_FILENO, "\0337\x1b[?47h\x1b[2J\x1b[999B", 18); // save cursor position, change to alternet buffer, clear the screen, go to the last line
 		write(STDOUT_FILENO, "\x1b[6 q\n", 6); // change cursor shape
 		while(!end) {
-
 			len = sprintf(tmp_out, "\x1b[?25l"); // hide cursor
 			len += sprintf(tmp_out+len, "\x1b[%iA\x1b[%iM", cursor_row+1, num_rows+1); // clear previous output
 
@@ -592,10 +621,12 @@ int main(int argc, char** argv) {
 								int in_row = 0;
 								int num_rows_msg = 1;
 								int last_word = 0;
+								int start_space = 0;
 								while(len_written < msg_length) {
 									if(isblank(tmp_in[9+len_recv+len_written]))
 										last_word = 0;
-									if(num_rows_msg == 1 || in_row != 0 || !isblank(tmp_in[9+len_recv+len_written])) /* spaces after newline get ignored */ {
+									if(ignore_breaking || num_rows_msg == 1 || in_row != 0 || !isblank(tmp_in[9+len_recv+len_written]) || start_space != 0) /* spaces after newline get ignored */ {
+										start_space = 0;
 										if(!isblank(tmp_in[9+len_recv+len_written]))
 											last_word++;
 										len_written++;
@@ -604,18 +635,21 @@ int main(int argc, char** argv) {
 												len_written++;
 										in_row++;
 										if(in_row >= width*MAX_MESSAGE_WIDTH) /* we need a new line */ {
-											if(ignore_breaking || last_word == 0 || last_word > width*MAX_WRAP_WORD || len_written == msg_length || isblank(tmp_in[9+len_recv+len_written])) /* don't worry about breaking words */ {
+											if(ignore_breaking || last_word == 0 || last_word > width*MAX_MESSAGE_WIDTH*MAX_WRAP_WORD || len_written == msg_length || isblank(tmp_in[9+len_recv+len_written])) /* don't worry about breaking words */ {
 												effective_width = in_row;
 												in_row = 0;
 											} else /*  avoid breaking the word */ {
 												if(effective_width < in_row-last_word)
-													effective_width = in_row-last_word;
+													effective_width = in_row-last_word-1;
 												in_row = last_word;
 											}
-											num_rows_msg++;
+											if(len_written != msg_length)
+												num_rows_msg++;
 										}
-									} else
+									} else {
+										start_space++;
 										len_written++;
+									}
 								}
 								if(effective_width < in_row)
 									effective_width = in_row;
@@ -627,6 +661,7 @@ int main(int argc, char** argv) {
 								in_row = 0;
 								last_word = 0;
 								int last_word_byte = 0;
+								start_space = 0;
 
 								for(int i = 0; i < rand_ind; i++)
 									tmp_out[len++] = ' ';
@@ -649,7 +684,8 @@ int main(int argc, char** argv) {
 										last_word = 0;
 										last_word_byte = 0;
 									}
-									if(rows_written == 0 || in_row != 0 || !isblank(tmp_in[9+len_recv+len_written])) /* spaces after newline get ignored */ {
+									if(ignore_breaking || rows_written == 0 || in_row != 0 || !isblank(tmp_in[9+len_recv+len_written]) || start_space) /* spaces after newline get ignored */ {
+										start_space = 0;
 										if(!isblank(tmp_in[9+len_recv+len_written])) {
 											last_word++;
 											last_word_byte++;
@@ -679,7 +715,7 @@ int main(int argc, char** argv) {
 											} else
 												len_beg += sprintf(beg+len_beg, "  \x1b[30;42m");
 
-											if(ignore_breaking || last_word == 0 || last_word > width*MAX_WRAP_WORD || isblank(tmp_in[9+len_recv+len_written])) /* don't wory about breaking words */ {
+											if(ignore_breaking || last_word == 0 || last_word > width*MAX_MESSAGE_WIDTH*MAX_WRAP_WORD || isblank(tmp_in[9+len_recv+len_written])) /* don't wory about breaking words */ {
 												memcpy(tmp_out+len, beg, len_beg);
 												len += len_beg;
 												in_row = 0;
@@ -692,8 +728,10 @@ int main(int argc, char** argv) {
 												in_row = last_word;
 											}
 										}
-									} else
+									} else {
+										start_space++;
 										len_written++;
+									}
 								}
 								for(int i = in_row; i < effective_width; i++)
 									tmp_out[len++] = ' ';
@@ -705,7 +743,6 @@ int main(int argc, char** argv) {
 					} // we disconnect at the next recv
 				} else if(len_recv == 0) {
 					// disconnected
-					close(sock);
 					end = 1;
 				}
 			}
@@ -717,15 +754,18 @@ int main(int argc, char** argv) {
 			num_rows = 1;
 			int cursor_len = 0;
 			int cursor_in_row = 2;
+			int cursor_in_row_tmp = 2;
 			cursor_row = 0;
 			int last_word = 0;
 			int last_word_byte = 0;
+			int start_space = 0;
 			while(print_len < buff_len) {
 				if(isblank(buffer[print_len])) {
 					last_word = 0;
 					last_word_byte = 0;
 				}
-				if(in_row != 0 || !isblank(buffer[print_len])) /* spaces after newline get ignored */ {
+				if(ignore_breaking || in_row != 0 || !isblank(buffer[print_len]) || start_space) /* spaces after newline get ignored */ {
+					start_space = 0;
 					if(!isblank(buffer[print_len])) {
 						last_word++;
 						last_word_byte++;
@@ -735,12 +775,11 @@ int main(int argc, char** argv) {
 						while(print_len < buff_len && (buffer[print_len] & 0xc0) == 0x80) {
 							tmp_out[len++] = buffer[print_len++];
 							last_word_byte++;
-							if(cursor_len < cursor_pos)
-								cursor_len++;
+							cursor_len++;
 						}
 					in_row++;
-					if(in_row >= width) {
-						if(ignore_breaking || last_word == 0 || last_word > width/2 || print_len == buff_len || isblank(buffer[print_len])) /* don't worry about breaking words */ {
+					if(in_row >= width*MAX_INPUT_WIDTH) {
+						if(ignore_breaking || last_word == 0 || last_word > width*MAX_INPUT_WIDTH*MAX_WRAP_WORD || print_len == buff_len || isblank(buffer[print_len])) /* don't worry about breaking words */ {
 							tmp_out[len++] = '\n';
 							in_row = 0;
 						} else /* avoid breaking the word */ {
@@ -751,19 +790,39 @@ int main(int argc, char** argv) {
 						}
 						num_rows++;
 					}
-					if(cursor_len < cursor_pos) /* ajust the cursor */ {
-						cursor_len++;
+					cursor_len++;
+					if(cursor_len <= cursor_pos) /* adjust the cursor */ {
 						cursor_in_row++;
-						if(cursor_in_row >= width) {
-							if(ignore_breaking || last_word == 0 || last_word > width/2 || print_len == buff_len || isblank(buffer[print_len]))
+						cursor_in_row_tmp++;
+						if(cursor_in_row >= width*MAX_INPUT_WIDTH) {
+							if(ignore_breaking || last_word == 0 || last_word > width*MAX_INPUT_WIDTH*MAX_WRAP_WORD || print_len == buff_len || isblank(buffer[print_len])) {
 								cursor_in_row = 0;
-							else
+								cursor_in_row_tmp = 0;
+							} else {
 								cursor_in_row = last_word;
+								cursor_in_row_tmp = 0;
+							}
 							cursor_row++;
 						}
+					} else /* maby adjust the cursor if a word shouldn't break */ {
+						cursor_in_row_tmp++;
+						if(cursor_in_row_tmp >= width*MAX_INPUT_WIDTH) {
+							if(ignore_breaking || last_word == 0 || last_word > width*MAX_INPUT_WIDTH*MAX_WRAP_WORD || print_len == buff_len || isblank(buffer[print_len]))
+								cursor_in_row_tmp = 0;
+							else {
+								if(cursor_len-last_word_byte <= cursor_pos) {
+									cursor_in_row = last_word-(cursor_in_row_tmp-cursor_in_row);
+									cursor_row++;
+								}
+								cursor_in_row_tmp = last_word;
+							}
+						}
 					}
-				} else
+				} else {
+					start_space++;
 					print_len++;
+					cursor_len++;
+				}
 			}
 
 			// position cursor
@@ -883,6 +942,10 @@ int main(int argc, char** argv) {
 			write(STDOUT_FILENO, "\x1b[?47l\0338", 8);  // exit alternet buffer, restore cursor
 		else
 			fprintf(stdout, "\x1b[%iA\x1b[%iM\n", cursor_row+1, num_rows+1); // clear previous output
+	
+		if(use_udp)
+			close(udp_sock);
+		close(sock);
 	}
 
 	return EXIT_SUCCESS;
