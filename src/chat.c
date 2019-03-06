@@ -188,7 +188,7 @@ int main(int argc, char** argv) {
 	signal(SIGPIPE, SIG_IGN); // an error on send will cause a SIGPIPE
 	if(is_server) {
 		// create discovery socket if needed
-		int udp_sock;
+		int udp_sock = 0;
 		if(use_udp) {
 			udp_sock = socket(AF_INET, SOCK_DGRAM, 0);
 			if(udp_sock == -1) {
@@ -460,7 +460,7 @@ int main(int argc, char** argv) {
 			close(udp_sock);
 		close(sock);
 	} else {
-		int udp_sock;
+		int udp_sock = 0;
 		// create udp_sock
 		if(use_udp) {
 			udp_sock = socket(AF_INET, SOCK_DGRAM, 0);
