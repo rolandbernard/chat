@@ -524,6 +524,7 @@ int main(int argc, char** argv) {
 		server_addr = (struct sockaddr*)&addr;
 		server_addr_len = sizeof(addr);
 
+		unsigned char end = 0;
 		// use udp_sock
 		if(use_udp && use_auto_dis) {
 			fprintf(stderr, "Looking for server...\n");
@@ -550,15 +551,23 @@ int main(int argc, char** argv) {
 					exit(EXIT_FAILURE);
 				}
 				i--;
+				len = read(STDIN_FILENO, buffer, MAX_BUFFER_SIZE);
+				for(int j = 0; j < len; j++)
+					if(buffer[j] == 3 /* <C-c> */ || buffer[j] == 4 /* <C-d> */) {
+						i = 0;
+						end = 1;
+					}
 			}
-			if(def_host)
+			if(def_host && !end)
 				fprintf(stderr, "couldn't find a server, trying defaults\n");
 		}
 
-		// connect
-		if(connect(sock, server_addr, server_addr_len) == -1) {
-			perror("couldn't connect to addr");
-			exit(EXIT_FAILURE);
+		if(!end) {
+			// connect
+			if(connect(sock, server_addr, server_addr_len) == -1) {
+				perror("couldn't connect to addr");
+				exit(EXIT_FAILURE);
+			}
 		}
 
 		struct pollfd listenfd[2];
@@ -568,10 +577,8 @@ int main(int argc, char** argv) {
 		listenfd[1].events = POLLIN;
 		listenfd[1].revents = 0;
 
-		unsigned char end = 0;
 		unsigned int width = 0;
 		unsigned int height = 0;
-
 
 		char tmp_out[3*MAX_BUFFER_SIZE];
 		char tmp_in[MAX_BUFFER_SIZE+MAX_HEADER_SIZE];
@@ -581,17 +588,20 @@ int main(int argc, char** argv) {
 
 		int cursor_row = 0;
 
-		// get the id
 		unsigned int id;
-		int len = recv(sock, tmp_in, 4, MSG_WAITALL);
-		if(len == 4) {
-			id = (unsigned int)(unsigned char)tmp_in[0] | ((unsigned int)(unsigned char)tmp_in[1] << 8)
-				| ((unsigned int)(unsigned char)tmp_in[2] << 16) | ((unsigned int)(unsigned char)tmp_in[3] << 24);
-		} else {
-			perror("didn't recv client id");
-			exit(EXIT_FAILURE);
-		}
 		unsigned int last_cid = ~0;
+		int len = recv(sock, tmp_in, 4, MSG_WAITALL);
+		
+		if(!end) {
+			// get the id
+			if(len == 4) {
+				id = (unsigned int)(unsigned char)tmp_in[0] | ((unsigned int)(unsigned char)tmp_in[1] << 8)
+					| ((unsigned int)(unsigned char)tmp_in[2] << 16) | ((unsigned int)(unsigned char)tmp_in[3] << 24);
+			} else {
+				perror("didn't recv client id");
+				exit(EXIT_FAILURE);
+			}
+		}
 
 		get_termsize(&width, &height);
 		if(use_alternet)
