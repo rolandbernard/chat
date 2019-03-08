@@ -421,21 +421,21 @@ int main(int argc, char** argv) {
 								num_clients_con--;
 								close(listenfd[3+i].fd);
 								memmove(listenfd+3+i, listenfd+3+i+1, sizeof(struct pollfd)*(num_clients_con-i));
-								memmove(cids+i, cids+3+i+1, sizeof(unsigned int)*(num_clients_con-i));
+								memmove(cids+i, cids+i+1, sizeof(unsigned int)*(num_clients_con-i));
 							}
 						} else {
 							// disconnect client
 							num_clients_con--;
 							close(listenfd[3+i].fd);
 							memmove(listenfd+3+i, listenfd+3+i+1, sizeof(struct pollfd)*(num_clients_con-i));
-							memmove(cids+i, cids+3+i+1, sizeof(unsigned int)*(num_clients_con-i));
+							memmove(cids+i, cids+i+1, sizeof(unsigned int)*(num_clients_con-i));
 						}
 					} else if(len == 0) {
 						// disconnect client
 						num_clients_con--;
 						close(listenfd[3+i].fd);
 						memmove(listenfd+3+i, listenfd+3+i+1, sizeof(struct pollfd)*(num_clients_con-i));
-						memmove(cids+i, cids+3+i+1, sizeof(unsigned int)*(num_clients_con-i));
+						memmove(cids+i, cids+i+1, sizeof(unsigned int)*(num_clients_con-i));
 					} /* else error (EAGAIN || EWOULDBLOCK) */
 				}
 			}
