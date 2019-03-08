@@ -327,11 +327,6 @@ int main(int argc, char** argv) {
 					buffer[0] = 'O';
 					buffer[1] = 'K';
 					sendto(udp_sock, buffer, 2, 0, (struct sockaddr*)&addr, addr_len);
-				} else {
-					buffer[0] = 'E';
-					buffer[1] = 'R';
-					buffer[2] = 'R';
-					sendto(udp_sock, buffer, 3, 0, (struct sockaddr*)&addr, addr_len);
 				}
 			}
 
