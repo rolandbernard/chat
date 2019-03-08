@@ -608,7 +608,14 @@ int main(int argc, char** argv) {
 			write(STDOUT_FILENO, "\0337\x1b[?47h\x1b[2J\x1b[999B", 18); // save cursor position, change to alternet buffer, clear the screen, go to the last line
 		write(STDOUT_FILENO, "\x1b[6 q\n", 6); // change cursor shape
 		while(!end) {
-			len = sprintf(tmp_out, "\x1b[?25l"); // hide cursor
+			get_termsize(&width, &height);
+
+			if(use_group)
+				len = sprintf(tmp_out, "\e]2;@%s\a", group);
+			else
+				len = sprintf(tmp_out, "\e]2;no group\a");
+
+			len += sprintf(tmp_out+len, "\x1b[?25l"); // hide cursor
 			len += sprintf(tmp_out+len, "\x1b[%iA\r\x1b[J", cursor_row+1); // clear previous output
 
 			// get mesages
@@ -956,10 +963,6 @@ int main(int argc, char** argv) {
 					}
 				}
 			}
-
-			get_termsize(&width, &height);
-
-
 		}
 		if(use_alternet)
 			write(STDOUT_FILENO, "\x1b[2J\x1b[?47l\0338", 12);  // exit alternet buffer, restore cursor
