@@ -4,9 +4,9 @@
 
 #include "types.h"
 
-hash_t hash_crc(const char* data, len_t size, const hash_t* table);
+hash32_t hash_crc32(const char* data, len_t size, const hash32_t* table);
 
-hash_t hash_fnv(const char* data, len_t size);
+hash32_t hash_fnv_1a32(const char* data, len_t size);
 
 void hash_sha256(hash256_t ret, const char* data, len_t size);
 

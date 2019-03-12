@@ -2,8 +2,8 @@
 
 #include "hash.h"
 
-hash_t hash_crc(const char* data, len_t size, const hash_t* table) {
-	hash_t hash = ~0;
+hash32_t hash_crc32(const char* data, len_t size, const hash32_t* table) {
+	hash32_t hash = ~0;
 
 	for(len_t i = 0; i < size; i++)
 		hash = (hash >> 8) ^ table[(hash ^ data[i]) & 0xFF];
@@ -14,8 +14,8 @@ hash_t hash_crc(const char* data, len_t size, const hash_t* table) {
 #define FNV_OFFSET_BASIS 2166136261
 #define FNV_PRIME 16777619
 
-hash_t hash_fnv(const char* data, len_t size) {
-	hash_t hash = FNV_OFFSET_BASIS;
+hash32_t hash_fnv_1a32(const char* data, len_t size) {
+	hash32_t hash = FNV_OFFSET_BASIS;
 
 	for(len_t i = 0; i < size; i++) {
 		hash ^= data[i];

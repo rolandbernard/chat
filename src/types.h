@@ -11,7 +11,7 @@
 
 typedef uint32_t id_t;
 typedef uint32_t len_t;
-typedef uint32_t hash_t;
+typedef uint32_t hash32_t;
 typedef uint8_t hash256_t[32];
 typedef uint8_t hash512_t[64];
 
