@@ -120,7 +120,7 @@ int main(int argc, char** argv) {
 		} else if(strcmp("-H", argv[i]) == 0 || strcasecmp("--auto-discovery", argv[i]) == 0) /* use automatic host discovery */ {
 			use_auto_dis = 1;
 			use_udp = 1;
-		}  else if(strcmp("-B", argv[i]) == 0 || strcasecmp("--ignore-break", argv[i]) == 0) /* use automatic host discovery */ {
+		}  else if(strcmp("-B", argv[i]) == 0 || strcasecmp("--ignore-break", argv[i]) == 0) /* don't try to avoid breaking words */ {
 			ignore_breaking = 1;
 		} else if(strcmp("-U", argv[i]) == 0 || strcasecmp("--no-utf-8", argv[i]) == 0) /* don't use utf-8 */ {
 			use_utf8 = 0;
