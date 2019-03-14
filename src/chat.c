@@ -185,8 +185,8 @@ int main(int argc, char** argv) {
 	newterm.c_cc[VTIME] = 0;
 	tcsetattr(STDIN_FILENO, 0, &newterm);
 
-	signal(SIGPIPE, SIG_IGN); // an error on send will cause a SIGPIPE
-	if(is_server) {
+	signal(SIGPIPE, SIG_IGN); // calling send() after the conection was closed will cause a SIGPIPE
+	if(is_server)
 		// create discovery socket if needed
 		int udp_sock = 0;
 		if(use_udp) {
