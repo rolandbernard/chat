@@ -14,6 +14,7 @@ typedef uint32_t len_t;
 typedef uint32_t hash32_t;
 typedef uint8_t hash256_t[32];
 typedef uint8_t hash512_t[64];
+typedef uint8_t data256_t[32];
 
 typedef struct {
 	id_t cid;
