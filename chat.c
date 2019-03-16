@@ -631,6 +631,8 @@ int main(int argc, char** argv) {
 								if(use_group)
 									tmp_in[8+group_pos] = 0;
 								int msg_length = recvlen-len_recv-1;
+								while(tmp_in[8+len_recv+msg_length] == 0) // remove tailing '\0'
+									msg_length--;
 
 								// print the sender if needed
 								if(last_cid != recvid) {

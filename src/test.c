@@ -1,26 +1,41 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <unistd.h>
 
 #include "random.h"
-
-#define NUM_ROLL 10000000
-#define NUM_POS 6
+#include "cipher.h"
 
 int main(int argc, char** argv) {
+	data512_t key;
+	data512_t ind;
+	char buffer[1025];
+	len_t len;
 
-	len_t acc[NUM_POS] = { 0 };
+	len = read(STDIN_FILENO, buffer, 1024);
+	if(buffer[len-1] == '\n') len--;
+	buffer[len] = 0;
+
+	for(len_t i = 0; i < len; i++)
+		fprintf(stdout, "%.2hhx ", buffer[i]);
+	fprintf(stdout, "\n");
+
 	random_seed_unix_urandom();
-	for(len_t i = 0; i < NUM_ROLL; i++) {
-		data256_t randdata;
-		random_get(randdata);
-		uint32_t ind = 0;
-		for(len_t j = 0; j < sizeof(randdata); j++)
-			ind ^= randdata[j] << ((j*8)%(sizeof(ind)*8));
-		acc[ind%NUM_POS]++;
-	}
-	for(len_t i = 0; i < NUM_POS; i++)
-		printf("%i: %i\n", i+1, acc[i]);
+	random_get(key);
+	random_get(ind);
+	len = cipher_encryptdata(buffer, buffer, len, ind, key);
+	buffer[len] = 0;
+
+	for(len_t i = 0; i < len; i++)
+		fprintf(stdout, "%.2hhx ", buffer[i]);
+	fprintf(stdout, "\n");
+
+	len = cipher_decryptdata(buffer, buffer, len, ind, key);
+	buffer[len] = 0;
+
+	for(len_t i = 0; i < len; i++)
+		fprintf(stdout, "%.2hhx ", buffer[i]);
+	fprintf(stdout, "(%s)\n", buffer);
 
 	return 0;
 }
