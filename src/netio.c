@@ -23,7 +23,7 @@ error_t net_sendmsg(int sock, const msgbuf_t* msg) {
 	if(msg->group != NULL)
 		totallen += 1+grouplen;		// <len><name>[@<group>]\0
 	if(msg->flag & FLAG_MSG_ENC)
-		totallen += 5 + INDICATOR_LEN;	// <len>[~<ind>:KEY]<name>[@<group>]\0
+		totallen += 11 + INDICATOR_LEN;	// <len>[~<ind>:KEY]<name>[@<group>]\0
 	if(msg->flag & FLAG_MSG_TYP)
 		totallen += 4;		// <len>[~<ind>:KEY]<name>[@<group>][|TYP]\0
 	else if(msg->flag & FLAG_MSG_ENT)
@@ -41,8 +41,8 @@ error_t net_sendmsg(int sock, const msgbuf_t* msg) {
 		memcpy(buffer+sizeof(len_t)+buflen, msg->indicator, INDICATOR_LEN);
 		buflen += INDICATOR_LEN;
 		enc_start = buflen;
-		memcpy(buffer+sizeof(len_t)+buflen, ":KEY", 4);
-		buflen += 4;
+		memcpy(buffer+sizeof(len_t)+buflen, ":ENCRYPTED", 10);
+		buflen += 10;
 	}
 	memcpy(buffer+sizeof(len_t)+buflen, msg->name, namelen); /* add user name */
 	buflen += namelen;
@@ -115,12 +115,13 @@ error_t net_recvmsg(int sock, msgbuf_t* msg) {
 					data512_t ind;
 					hash_sha512(ind, msgre, INDICATOR_LEN);
 					msgre += INDICATOR_LEN;
-					buflen = cipher_decryptdata((uint8_t*)msgre, (uint8_t*)msgre, buflen-1-INDICATOR_LEN, ind, msg->key)-4;
-					if(strncmp(msgre, ":KEY", 4) != 0) /* couldn't decrypt the data */ {
+					buflen = cipher_decryptdata((uint8_t*)msgre, (uint8_t*)msgre, buflen-1-INDICATOR_LEN, ind, msg->key);
+					if(strncmp(msgre, ":ENCRYPTED", 10) != 0) /* couldn't decrypt the data */ {
 						free(buffer);
 						return ENC_DATA;
 					}
-					msgre += 4;
+					msgre += 10;
+					buflen -= 10;
 					msg->flag |= FLAG_MSG_ENC;
 				}
 				/* extract the header information */
