@@ -230,9 +230,9 @@ error_t client_main(const config_t conf) {
 					if(msg.flag & FLAG_MSG_TYP) /* typing info */ {
 						if(msg.cid != id && strcmp(status, "...") != 0) {
 							if(!use_group && msg.group != NULL)
-								snprintf(status, START_BUFFER_LEN, "%s@%s is trying...", msg.name, msg.group);
+								snprintf(status, START_BUFFER_LEN, "%s@%s is typing...", msg.name, msg.group);
 							else
-								snprintf(status, START_BUFFER_LEN, "%s is trying...", msg.name);
+								snprintf(status, START_BUFFER_LEN, "%s is typing...", msg.name);
 							last_status = time(NULL);
 							max_status_time = 1;
 						}
