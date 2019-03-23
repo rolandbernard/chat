@@ -1,3 +1,4 @@
+// Copyright (c) 2019 Roland Bernard
 
 #include <string.h>
 #include <stdlib.h>

@@ -1,4 +1,4 @@
-// Copyright (c9 2019 Roland Bernard
+// Copyright (c) 2019 Roland Bernard
 #ifndef __CIPHER_H__
 #define __CIPHER_H__
 
