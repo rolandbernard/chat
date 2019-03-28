@@ -310,9 +310,10 @@ void term_end(bool_t use_alternet) {
 	if(use_alternet) {
 		memcpy(buffer+buffer_len, "\x1b[2J\x1b[?47l\0338", 12);  // exit alternet buffer, restore cursor
 		buffer_len += 12;
-	}
-	memcpy(buffer+buffer_len, "\n\x1b[?25h", 7);
-	buffer_len += 7;
+	} else
+		buffer[buffer_len++] = '\n';
+	memcpy(buffer+buffer_len, "\x1b[?25h", 6);
+	buffer_len += 6;
 	term_refresh();
 	free(buffer);
 }

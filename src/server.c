@@ -206,23 +206,22 @@ error_t server_main(config_t conf) {
 		// see if anyone wants to send anything
 		for(int i = 0; i < num_clients_con; i++) {
 			if(listenfd[3+i].revents & POLLIN) {
-				len = recv(listenfd[3+i].fd, buffer+sizeof(id_t), sizeof(len_t), MSG_DONTWAIT);
+				len = recv(listenfd[3+i].fd, buffer, sizeof(id_t)+sizeof(len_t), MSG_DONTWAIT);
 				if(len >= 1) {
-					len += recv(listenfd[3+i].fd, buffer+sizeof(id_t)+len, sizeof(len_t)-len, MSG_WAITALL);
-					if(len == sizeof(len_t)) {
+					len += recv(listenfd[3+i].fd, buffer+len, sizeof(id_t)+sizeof(len_t)-len, MSG_WAITALL);
+					if(len == sizeof(id_t)+sizeof(len_t)) {
 						len_t len_read = 0;
 						for(uint32_t j = 0; j < sizeof(len_t); j++)
 							len_read |= (len_t)(uint8_t)buffer[sizeof(id_t)+j] << (8*j);
-						if(len_read+len+sizeof(id_t) > buffer_len) {
+						while(len_read+len > buffer_len) {
 							buffer = realloc(buffer, 2*buffer_len);
 							buffer_len *= 2;
 						}
-						len += recv(listenfd[3+i].fd, buffer+sizeof(id_t)+len, len_read, MSG_WAITALL);
-						if(len == sizeof(len_t)+len_read) {
+						len += recv(listenfd[3+i].fd, buffer+len, len_read, MSG_WAITALL);
+						if(len == sizeof(id_t)+sizeof(len_t)+len_read) {
 							// add the id to the message
 							for(uint32_t j = 0; j < sizeof(id_t); j++)
 								buffer[j] = (cids[i] >> (8*j)) & 0xff;
-							len += sizeof(id_t);
 							// forward data to anyone
 							for(int j = 0; j < num_clients_con; j++) {
 								int len_send = 0;

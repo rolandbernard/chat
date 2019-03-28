@@ -19,67 +19,69 @@ error_t net_sendmsg(int sock, const msgbuf_t* msg) {
 	else
 		grouplen = strlen(msg->group);
 
-	len_t totallen = namelen+1;	// <len><name>\0
+	len_t totallen = namelen+1;	// <id><len><name>\0
 	if(msg->group != NULL)
-		totallen += 1+grouplen;		// <len><name>[@<group>]\0
+		totallen += 1+grouplen;		// <id><len><name>[@<group>]\0
 	if(msg->flag & FLAG_MSG_ENC)
-		totallen += 11 + INDICATOR_LEN;	// <len>[~<ind>:KEY]<name>[@<group>]\0
+		totallen += 11 + INDICATOR_LEN;	// <id><len>[~<ind>:KEY]<name>[@<group>]\0
 	if(msg->flag & FLAG_MSG_TYP)
-		totallen += 4;		// <len>[~<ind>:KEY]<name>[@<group>][|TYP]\0
+		totallen += 4;		// <id><len>[~<ind>:KEY]<name>[@<group>][|TYP]\0
 	else if(msg->flag & FLAG_MSG_ENT)
-		totallen += 4;		// <len>[~<ind>:KEY]<name>[@<group>][|ENT]\0
+		totallen += 4;		// <id><len>[~<ind>:KEY]<name>[@<group>][|ENT]\0
 	else if(msg->flag & FLAG_MSG_EXT)
-		totallen += 4;		// <len>[~<ind>:KEY]<name>[@<group>][|EXT]\0
+		totallen += 4;		// <id><len>[~<ind>:KEY]<name>[@<group>][|EXT]\0
 	else
-		totallen += msg->data_len;	// <len>[~<ind>:KEY]<name>[@<group>][|TYP]\0[<data>]
+		totallen += msg->data_len;	// <id><len>[~<ind>:KEY]<name>[@<group>][|TYP]\0[<data>]
 	
-	uint8_t* buffer = (uint8_t*)malloc(sizeof(len_t)+totallen+2*sizeof(data256_t)); // +2*sizeof(data256_t) to be sure everything fits even after encryption
+	uint8_t* buffer = (uint8_t*)malloc(sizeof(id_t)+sizeof(len_t)+totallen+2*sizeof(data256_t)); // +2*sizeof(data256_t) to be sure everything fits even after encryption
 	len_t buflen = 0;
 	len_t enc_start;
 	if(msg->flag & FLAG_MSG_ENC) /* add indicator and encryption string */ {
-		buffer[sizeof(len_t)+buflen++] = '~';
-		memcpy(buffer+sizeof(len_t)+buflen, msg->indicator, INDICATOR_LEN);
+		buffer[sizeof(id_t)+sizeof(len_t)+buflen++] = '~';
+		memcpy(buffer+sizeof(len_t)+sizeof(len_t)+buflen, msg->indicator, INDICATOR_LEN);
 		buflen += INDICATOR_LEN;
 		enc_start = buflen;
-		memcpy(buffer+sizeof(len_t)+buflen, ":ENCRYPTED", 10);
+		memcpy(buffer+sizeof(id_t)+sizeof(len_t)+buflen, ":ENCRYPTED", 10);
 		buflen += 10;
 	}
-	memcpy(buffer+sizeof(len_t)+buflen, msg->name, namelen); /* add user name */
+	memcpy(buffer+sizeof(id_t)+sizeof(len_t)+buflen, msg->name, namelen); /* add user name */
 	buflen += namelen;
 	if(msg->group != NULL) /* add group name */ {
-		buffer[sizeof(len_t)+buflen++] = '@';
-		memcpy(buffer+sizeof(len_t)+buflen, msg->group, grouplen);
+		buffer[sizeof(id_t)+sizeof(len_t)+buflen++] = '@';
+		memcpy(buffer+sizeof(id_t)+sizeof(len_t)+buflen, msg->group, grouplen);
 		buflen += grouplen;
 	}
 	if(msg->flag & FLAG_MSG_TYP) /* add typping identifier */ {
-		memcpy(buffer+sizeof(len_t)+buflen, "|TYP", 4);
+		memcpy(buffer+sizeof(id_t)+sizeof(len_t)+buflen, "|TYP", 4);
 		buflen += 4;
 	} else if(msg->flag & FLAG_MSG_ENT) /* add enter identifier */ {
-		memcpy(buffer+sizeof(len_t)+buflen, "|ENT", 4);
+		memcpy(buffer+sizeof(id_t)+sizeof(len_t)+buflen, "|ENT", 4);
 		buflen += 4;
 	} else if(msg->flag & FLAG_MSG_EXT) /* add exit identifier */ {
-		memcpy(buffer+sizeof(len_t)+buflen, "|EXT", 4);
+		memcpy(buffer+sizeof(id_t)+sizeof(len_t)+buflen, "|EXT", 4);
 		buflen += 4;
 	}
 
-	buffer[sizeof(len_t)+buflen++] = 0;
+	buffer[sizeof(id_t)+sizeof(len_t)+buflen++] = 0;
 	if(msg->data != NULL) {
-		memcpy(buffer+sizeof(len_t)+buflen, msg->data, msg->data_len); /* Add data */
+		memcpy(buffer+sizeof(id_t)+sizeof(len_t)+buflen, msg->data, msg->data_len); /* Add data */
 		buflen += msg->data_len;
 	}
 
 	if(msg->flag & FLAG_MSG_ENC) /* encrypt the data after the indicator */ {
 		data512_t ind;
 		hash_sha512(ind, msg->indicator, INDICATOR_LEN);
-		buflen = cipher_encryptdata(buffer+sizeof(len_t)+enc_start, buffer+sizeof(len_t)+enc_start, buflen-enc_start, ind, msg->key)+enc_start;
+		buflen = cipher_encryptdata(buffer+sizeof(id_t)+sizeof(len_t)+enc_start, buffer+sizeof(id_t)+sizeof(len_t)+enc_start, buflen-enc_start, ind, msg->key)+enc_start;
 	}
-	for(len_t i = 0; i < sizeof(len_t); i++) /* add the length of the message at the start */
-		buffer[i] = (buflen >> (i*8)) & 0xff;
+	for(len_t i = 0; i < sizeof(id_t); i++) /* add the id of the client at the start */
+		buffer[i] = (msg->cid >> (i*8)) & 0xff;
+	for(len_t i = 0; i < sizeof(len_t); i++) /* add the length of the message at the start after the id */
+		buffer[sizeof(id_t)+i] = (buflen >> (i*8)) & 0xff;
 
 	/* send the message */
 	len_t len_send = 0;
 	while(len_send < buflen+sizeof(len_t)) {
-		len_t tmp_len = send(sock, buffer+len_send, sizeof(len_t)+buflen-len_send, 0);
+		len_t tmp_len = send(sock, buffer+len_send, sizeof(id_t)+sizeof(len_t)+buflen-len_send, 0);
 		if(tmp_len == -1) {
 			free(buffer);
 			return ERROR;
