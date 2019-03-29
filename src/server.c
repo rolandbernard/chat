@@ -14,7 +14,8 @@
 #include "server.h"
 
 #define TIMEOUT_SEC 2
-#define MAX_HISTORY_SIZE 1048576
+#define MAX_HISTORY_SIZE 262144
+#define MAX_HISTORY_SAVE 1024
 #define SERVER_CLOCK 1000
 #define START_BUFFER_LEN 1024
 
@@ -130,7 +131,7 @@ error_t server_main(config_t conf) {
 
 	// variables to keep track of some stats
 	uint64_t num_messg = 0;
-	uint32_t num_messg_hist = 0;
+	uint64_t num_messg_hist = 0;
 	time_t start_time = time(NULL);
 	uint64_t loops = 0;
 
@@ -149,7 +150,7 @@ error_t server_main(config_t conf) {
 		hou %= 24;
 		fprintf(stderr, "\x1b[3M"); // clear previous output
 		fprintf(stderr, "uptime: %i days %i hours %i min. %i sec. (%lu)\n", day, hou, min, sec, loops);
-		fprintf(stderr, "number of messages: %lu (%u)\n", num_messg, num_messg_hist);
+		fprintf(stderr, "number of messages: %lu (%lu)\n", num_messg, num_messg_hist);
 		fprintf(stderr, "number of clients: %lu (%lu)\n", num_clients_con, cid);
 		fprintf(stderr, "\x1b[3A"); // go up 3 lines
 
@@ -177,7 +178,7 @@ error_t server_main(config_t conf) {
 					buffer[i] = (id >> (8*i)) & 0xff;
 				len = 0;
 				while(len < sizeof(id_t)) {
-					int tmp_len = send(new_client, buffer, sizeof(id_t)-len, 0);
+					int tmp_len = send(new_client, buffer+len, sizeof(id_t)-len, 0);
 					if(tmp_len == -1)
 						break;
 					else
@@ -186,7 +187,7 @@ error_t server_main(config_t conf) {
 				// send history to the client
 				len = 0;
 				while(len < history_len) {
-					int tmp_len = send(new_client, history, history_len, 0);
+					uint64_t tmp_len = send(new_client, history+len, history_len-len, 0);
 					if(tmp_len == -1)
 						break;
 					else
@@ -234,11 +235,11 @@ error_t server_main(config_t conf) {
 								}
 							}
 							// remove messages from history if needed
-							if(MAX_HISTORY_SIZE >= len)
+							if(MAX_HISTORY_SAVE >= len)
 								while(history_len+len > MAX_HISTORY_SIZE) {
-									unsigned int len_first = 0;
+									len_t len_first = 0;
 									for(uint32_t j = 0; j < sizeof(len_t); j++)
-										len_read |= (len_t)(uint8_t)buffer[sizeof(id_t)+j] << (8*j);
+										len_first |= (len_t)(uint8_t)history[sizeof(id_t)+j] << (8*j);
 									history_len -= sizeof(id_t)+sizeof(len_t)+len_first;
 									memmove(history, history+sizeof(id_t)+sizeof(len_t)+len_first, history_len);
 									num_messg_hist--;
@@ -247,7 +248,7 @@ error_t server_main(config_t conf) {
 							num_messg_hist++;
 							// add data to history
 							memcpy(history+history_len, buffer, len);
-							history_len+=len;
+							history_len += len;
 						} else {
 							// disconnect client
 							num_clients_con--;

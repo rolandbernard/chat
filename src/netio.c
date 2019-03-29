@@ -9,8 +9,6 @@
 #include "cipher.h"
 #include "hash.h"
 
-#include <stdio.h>
-
 error_t net_sendmsg(int sock, const msgbuf_t* msg) {
 	len_t namelen = strlen(msg->name);
 	len_t grouplen;
@@ -98,7 +96,7 @@ error_t net_recvmsg(int sock, msgbuf_t* msg) {
 	uint8_t bufferhead[sizeof(id_t)+sizeof(len_t)];
 	len_t len = recv(sock, bufferhead, sizeof(id_t)+sizeof(len_t), MSG_DONTWAIT); /* recv the id and length of the message */
 	if(len >= 1) {
-		len_t tmp_len = recv(sock, bufferhead, sizeof(id_t)+sizeof(len_t)-len, MSG_WAITALL); /* recv the rest of the id and length */
+		len_t tmp_len = recv(sock, bufferhead+len, sizeof(id_t)+sizeof(len_t)-len, MSG_WAITALL); /* recv the rest of the id and length */
 		len += tmp_len;
 		if(len == sizeof(id_t)+sizeof(len_t)) {
 			msg->cid = 0;
