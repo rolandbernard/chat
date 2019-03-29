@@ -197,16 +197,19 @@ error_t client_main(const config_t conf) {
 
 	char status[START_BUFFER_LEN/2];
 	snprintf(status, START_BUFFER_LEN, "...");
-	time_t last_status = time(NULL);
-	time_t max_status_time = 2;
+	struct timeval last_status;
+	gettimeofday(&last_status, NULL);
+	uint64_t max_status_time_usec = 2000000;
 
 	random_seed_unix_urandom();
 	term_init(use_alternet);
 	while(!end) {
-		if(last_status != 0) {
-			if(time(NULL)-last_status >= max_status_time) {
+		if(max_status_time_usec != 0) {
+			struct timeval now;
+			gettimeofday(&now, NULL);
+			if((now.tv_sec - last_status.tv_sec)*1000000 + (now.tv_usec - last_status.tv_usec) >= max_status_time_usec) {
 				status[0] = 0;
-				last_status = 0;
+				max_status_time_usec = 0;
 			}
 		}
 
@@ -233,8 +236,8 @@ error_t client_main(const config_t conf) {
 								snprintf(status, START_BUFFER_LEN, "%s@%s is typing...", msg.name, msg.group);
 							else
 								snprintf(status, START_BUFFER_LEN, "%s is typing...", msg.name);
-							last_status = time(NULL);
-							max_status_time = 1;
+							gettimeofday(&last_status, NULL);
+							max_status_time_usec = 500000;
 						}
 					} else if(msg.flag & FLAG_MSG_ENT) /* entering info */ {
 						if(msg.cid != id && strcmp(status, "...") != 0) {
@@ -242,8 +245,8 @@ error_t client_main(const config_t conf) {
 								snprintf(status, START_BUFFER_LEN, "%s@%s entered the chat...", msg.name, msg.group);
 							else
 								snprintf(status, START_BUFFER_LEN, "%s entered the chat...", msg.name);
-							last_status = time(NULL);
-							max_status_time = 10;
+							gettimeofday(&last_status, NULL);
+							max_status_time_usec = 10000000;
 						}
 					} else if(msg.flag & FLAG_MSG_EXT) /* exiting info */ {
 						if(msg.cid != id && strcmp(status, "...") != 0) {
@@ -251,8 +254,8 @@ error_t client_main(const config_t conf) {
 								snprintf(status, START_BUFFER_LEN, "%s@%s left the chat...", msg.name, msg.group);
 							else
 								snprintf(status, START_BUFFER_LEN, "%s left the chat...", msg.name);
-							last_status = time(NULL);
-							max_status_time = 10;
+							gettimeofday(&last_status, NULL);
+							max_status_time_usec = 10000000;
 						}
 					} else if(msg.data != NULL) /* normal message */ {
 						uint8_t flags =
