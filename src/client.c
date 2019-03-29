@@ -8,7 +8,7 @@
 #include <string.h>
 #include <sys/time.h>
 #include <unistd.h>
-#include <poll.h>
+#include <sys/select.h>
 #include <ctype.h>
 #include <time.h>
 
@@ -145,12 +145,11 @@ error_t client_main(const config_t conf) {
 		}
 	}
 
-	struct pollfd listenfd[2];
-	listenfd[0].fd = STDIN_FILENO;
-	listenfd[0].events = POLLIN;
-	listenfd[1].fd = sock;
-	listenfd[1].events = POLLIN;
-	listenfd[1].revents = 0;
+	int listenfd[2];
+	listenfd[0] = STDIN_FILENO;
+	listenfd[1] = sock;
+	fd_set fds;
+	FD_ZERO(&fds);
 
 	char* buffer = (char*)malloc(START_BUFFER_LEN);
 	len_t buffer_len = START_BUFFER_LEN;
@@ -223,7 +222,7 @@ error_t client_main(const config_t conf) {
 		term_reset_promt();
 
 		// get mesages
-		if(listenfd[1].revents & POLLIN) {
+		if(FD_ISSET(listenfd[1], &fds)) {
 			msgbuf_t msg;
 			if(use_enc)
 				hash_sha512(msg.key, conf.passwd, strlen(conf.passwd));
@@ -284,10 +283,18 @@ error_t client_main(const config_t conf) {
 		
 		term_refresh();
 
-		poll(listenfd, 2, CLIENT_CLOCK);
+		FD_ZERO(&fds);
+		FD_SET(listenfd[0], &fds);
+		FD_SET(listenfd[1], &fds);
+
+		struct timeval timeout;
+		timeout.tv_sec = CLIENT_CLOCK/1000;
+		timeout.tv_usec = (CLIENT_CLOCK%1000)*1000;
+
+		select(listenfd[1]+1, &fds, NULL, NULL, &timeout);
 
 		// read stdin
-		if(listenfd[0].revents & POLLIN) {
+		if(FD_ISSET(listenfd[0], &fds)) {
 			int len_in = read(STDIN_FILENO, tmp_in, START_BUFFER_LEN);
 			if(len_in >= 1) {
 				for(int i = 0; i < len_in; i++) {
