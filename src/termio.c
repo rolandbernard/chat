@@ -216,6 +216,17 @@ void term_write_msg(const msgbuf_t* msg, uint8_t flag) {
 	if(effective_width < in_row)
 		effective_width = in_row;
 
+	// decide on the colors
+	uint8_t fgc;
+	uint8_t bgc;
+	if(own) {
+		fgc = 7;
+		bgc = 4;
+	} else {
+		fgc = 0;
+		bgc = msg->cid % 256;
+	}
+
 	// actualy print the message
 	int rand_ind = rand()%MAX_RAND_IND;
 	int rows_written = 0;
@@ -230,16 +241,16 @@ void term_write_msg(const msgbuf_t* msg, uint8_t flag) {
 	if(own) {
 		if(num_rows_msg == 1)
 			if(use_utf8)
-				buffer_len += sprintf(buffer+buffer_len, "\x1b[34m◢\x1b[m\x1b[37;44m");
+				buffer_len += sprintf(buffer+buffer_len, "\x1b[38;5;%im◢\x1b[m\x1b[38;5;%i;48;5;%im", bgc, fgc, bgc);
 			else
-				buffer_len += sprintf(buffer+buffer_len, "\x1b[34m_\x1b[m\x1b[37;44m");
+				buffer_len += sprintf(buffer+buffer_len, "\x1b[38;5;%im_\x1b[m\x1b[38;5;%i;48;5;%im", bgc, fgc, bgc);
 		else
-			buffer_len += sprintf(buffer+buffer_len, " \x1b[37;44m");
+			buffer_len += sprintf(buffer+buffer_len, " \x1b[38;5;%i;48;5;%im", fgc, bgc);
 	} else
 		if(use_utf8)
-			buffer_len += sprintf(buffer+buffer_len, " \x1b[32m◥\x1b[m\x1b[30;42m");
+			buffer_len += sprintf(buffer+buffer_len, " \x1b[38;5;%im◥\x1b[m\x1b[38;5;%i;48;5;%im", bgc, fgc, bgc);
 		else
-			buffer_len += sprintf(buffer+buffer_len, " \x1b[32m*\x1b[m\x1b[30;42m");
+			buffer_len += sprintf(buffer+buffer_len, " \x1b[38;5;%im*\x1b[m\x1b[38;5;%i;48;5;%im", bgc, fgc, bgc);
 
 	while(len_written < msg->data_len) {
 		if(isblank(msg->data[len_written])) {
@@ -269,13 +280,13 @@ void term_write_msg(const msgbuf_t* msg, uint8_t flag) {
 				if(own) {
 					if(rows_written == num_rows_msg-1)
 						if(use_utf8)
-							len_beg += sprintf(beg+len_beg, "\x1b[34m◢\x1b[m\x1b[37;44m");
+							len_beg += sprintf(beg+len_beg, "\x1b[38;5;%im◢\x1b[m\x1b[38;5;%i;48;5;%im", bgc, fgc, bgc);
 						else
-							len_beg += sprintf(beg+len_beg, "\x1b[34m_\x1b[m\x1b[37;44m");
+							len_beg += sprintf(beg+len_beg, "\x1b[38;5;%im_\x1b[m\x1b[38;5;%i;48;5;%im", bgc, fgc, bgc);
 					else
-						len_beg += sprintf(beg+len_beg, " \x1b[37;44m");
+						len_beg += sprintf(beg+len_beg, " \x1b[38;5;%i;48;5;%im", fgc, bgc);
 				} else
-					len_beg += sprintf(beg+len_beg, "  \x1b[30;42m");
+					len_beg += sprintf(beg+len_beg, "  \x1b[38;5;%i;48;5;%im", fgc, bgc);
 
 				if(ignore_breaking || last_word == 0 || last_word > width*MAX_MESSAGE_WIDTH*MAX_WRAP_WORD || isblank(msg->data[len_written])) /* don't wory about breaking words */ {
 					memcpy(buffer+buffer_len, beg, len_beg);
