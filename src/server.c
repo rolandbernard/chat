@@ -7,8 +7,8 @@
 #include <arpa/inet.h>
 #include <fcntl.h>
 #include <unistd.h>
-#include <poll.h>
 #include <time.h>
+#include <sys/select.h>
 #include <string.h>
 
 #include "server.h"
@@ -108,17 +108,13 @@ error_t server_main(config_t conf) {
 	}
 
 	// setup list to store all clients
-	struct pollfd* listenfd = (struct pollfd*)malloc(sizeof(struct pollfd)*3);
-	listenfd[0].fd = STDIN_FILENO;
-	listenfd[0].events = POLLIN;
-	listenfd[1].fd = sock;
-	listenfd[1].events = POLLIN;
+	int* listenfd = (int*)malloc(sizeof(int)*3);
+	listenfd[0] = STDIN_FILENO;
+	listenfd[1] = sock;
 	if(use_dis) {
-		listenfd[2].fd = udp_sock;
-		listenfd[2].events = POLLIN;
+		listenfd[2] = udp_sock;
 	} else {
-		listenfd[2].fd = 0;
-		listenfd[2].events = 0;
+		listenfd[2] = 0;
 	}
 	id_t* cids = NULL;
 	len_t cid = 1;
@@ -154,10 +150,23 @@ error_t server_main(config_t conf) {
 		fprintf(stderr, "number of clients: %lu (%lu)\n", num_clients_con, cid);
 		fprintf(stderr, "\x1b[3A"); // go up 3 lines
 
-		poll(listenfd, 3+num_clients_con, SERVER_CLOCK);
+		fd_set fds;
+		FD_ZERO(&fds);
+		struct timeval timeout;
+		timeout.tv_sec = SERVER_CLOCK / 1000;
+		timeout.tv_usec = (SERVER_CLOCK%1000)*1000;
+
+		int max_fd = 0;
+		for(len_t i = 0; i < num_clients_con+3; i++) {
+			FD_SET(listenfd[i], &fds);
+			if(listenfd[i] > max_fd)
+				max_fd = listenfd[i];
+		}
+
+		select(max_fd+1, &fds, NULL, NULL, &timeout);
 
 		// accept discovery messages
-		if(use_udp && (listenfd[2].revents & POLLIN)) {
+		if(use_udp && FD_ISSET(listenfd[2], &fds)) {
 			struct sockaddr_storage addr;
 			unsigned int addr_len = sizeof(addr);
 			len = recvfrom(udp_sock, buffer, buffer_len, MSG_DONTWAIT, (struct sockaddr*)&addr, &addr_len);
@@ -168,7 +177,7 @@ error_t server_main(config_t conf) {
 			}
 		}
 
-		if(listenfd[1].revents & POLLIN) {
+		if(FD_ISSET(listenfd[1], &fds)) {
 			// accept new client if there is one
 			int new_client = accept(sock, NULL, NULL);
 			if(new_client != -1) {
@@ -195,21 +204,19 @@ error_t server_main(config_t conf) {
 				}
 				num_clients_con++;
 				cids = realloc(cids, sizeof(id_t)*num_clients_con);
-				listenfd = realloc(listenfd, sizeof(struct pollfd)*(3+num_clients_con));
+				listenfd = realloc(listenfd, sizeof(int)*(3+num_clients_con));
 				cids[num_clients_con-1] = id;
 				cid++;
-				listenfd[3+num_clients_con-1].fd = new_client;
-				listenfd[3+num_clients_con-1].events = POLLIN;
-				listenfd[3+num_clients_con-1].revents = 0;
+				listenfd[3+num_clients_con-1] = new_client;
 			}
 		}
 
 		// see if anyone wants to send anything
 		for(int i = 0; i < num_clients_con; i++) {
-			if(listenfd[3+i].revents & POLLIN) {
-				len = recv(listenfd[3+i].fd, buffer, sizeof(id_t)+sizeof(len_t), MSG_DONTWAIT);
+			if(FD_ISSET(listenfd[3+i], &fds)) {
+				len = recv(listenfd[3+i], buffer, sizeof(id_t)+sizeof(len_t), MSG_DONTWAIT);
 				if(len >= 1) {
-					len += recv(listenfd[3+i].fd, buffer+len, sizeof(id_t)+sizeof(len_t)-len, MSG_WAITALL);
+					len += recv(listenfd[3+i], buffer+len, sizeof(id_t)+sizeof(len_t)-len, MSG_WAITALL);
 					if(len == sizeof(id_t)+sizeof(len_t)) {
 						len_t len_read = 0;
 						for(uint32_t j = 0; j < sizeof(len_t); j++)
@@ -218,7 +225,7 @@ error_t server_main(config_t conf) {
 							buffer = realloc(buffer, 2*buffer_len);
 							buffer_len *= 2;
 						}
-						len += recv(listenfd[3+i].fd, buffer+len, len_read, MSG_WAITALL);
+						len += recv(listenfd[3+i], buffer+len, len_read, MSG_WAITALL);
 						if(len == sizeof(id_t)+sizeof(len_t)+len_read) {
 							// add the id to the message
 							for(uint32_t j = 0; j < sizeof(id_t); j++)
@@ -227,7 +234,7 @@ error_t server_main(config_t conf) {
 							for(int j = 0; j < num_clients_con; j++) {
 								int len_send = 0;
 								while(len_send != len) {
-									int tmp_len = send(listenfd[3+j].fd, buffer+len_send, len, 0);
+									int tmp_len = send(listenfd[3+j], buffer+len_send, len, 0);
 									if(tmp_len == -1) /* error */
 										break; // if the connection is closed it is removed at the next recv
 									else
@@ -252,28 +259,28 @@ error_t server_main(config_t conf) {
 						} else {
 							// disconnect client
 							num_clients_con--;
-							close(listenfd[3+i].fd);
-							memmove(listenfd+3+i, listenfd+3+i+1, sizeof(struct pollfd)*(num_clients_con-i));
+							close(listenfd[3+i]);
+							memmove(listenfd+3+i, listenfd+3+i+1, sizeof(int)*(num_clients_con-i));
 							memmove(cids+i, cids+i+1, sizeof(id_t)*(num_clients_con-i));
 						}
 					} else {
 						// disconnect client
 						num_clients_con--;
-						close(listenfd[3+i].fd);
-						memmove(listenfd+3+i, listenfd+3+i+1, sizeof(struct pollfd)*(num_clients_con-i));
+						close(listenfd[3+i]);
+						memmove(listenfd+3+i, listenfd+3+i+1, sizeof(int)*(num_clients_con-i));
 						memmove(cids+i, cids+i+1, sizeof(id_t)*(num_clients_con-i));
 					}
 				} else if(len == 0) {
 					// disconnect client
 					num_clients_con--;
-					close(listenfd[3+i].fd);
-					memmove(listenfd+3+i, listenfd+3+i+1, sizeof(struct pollfd)*(num_clients_con-i));
+					close(listenfd[3+i]);
+					memmove(listenfd+3+i, listenfd+3+i+1, sizeof(int)*(num_clients_con-i));
 					memmove(cids+i, cids+i+1, sizeof(id_t)*(num_clients_con-i));
 				} /* else error (EAGAIN || EWOULDBLOCK) */
 			}
 		}
 
-		if(listenfd[0].revents & POLLIN) {
+		if(FD_ISSET(listenfd[0], &fds)) {
 			// read stdin
 			len = read(STDIN_FILENO, buffer, buffer_len);
 			if(len >= 1)
@@ -286,7 +293,7 @@ error_t server_main(config_t conf) {
 	}
 	fprintf(stderr, "\x1b[?25h\x1b[3M"); // show cursor and delete stat output
 	for(int i = 0; i < num_clients_con; i++)
-		close(listenfd[3+i].fd);
+		close(listenfd[3+i]);
 	free(listenfd);
 	free(cids);
 	if(use_udp)
