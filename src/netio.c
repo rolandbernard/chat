@@ -38,7 +38,7 @@ error_t net_sendmsg(int sock, const msgbuf_t* msg) {
 	len_t enc_start;
 	if(msg->flag & FLAG_MSG_ENC) /* add indicator and encryption string */ {
 		buffer[sizeof(id_t)+sizeof(len_t)+buflen++] = '~';
-		memcpy(buffer+sizeof(len_t)+sizeof(len_t)+buflen, msg->indicator, INDICATOR_LEN);
+		memcpy(buffer+sizeof(id_t)+sizeof(len_t)+buflen, msg->indicator, INDICATOR_LEN);
 		buflen += INDICATOR_LEN;
 		enc_start = buflen;
 		memcpy(buffer+sizeof(id_t)+sizeof(len_t)+buflen, ":ENCRYPTED", 10);
