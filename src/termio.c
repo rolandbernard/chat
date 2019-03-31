@@ -157,6 +157,57 @@ void term_wrire_promt(const char* data, len_t len, uint32_t cursor_pos, uint8_t 
 	buffer_len += 6;
 }
 
+// if anyone wants to turn this | into an formula, I would be happy to implement it.
+//                             \|/
+//                              v
+static const uint8_t color_lookup[256] = {
+	1, 1, 0, 0, 1, 0, 0, 0,  0, 0, 0, 0, 0, 0, 0, 0,
+
+	1, 1, 1, 1, 1, 1,
+	1, 1, 1, 1, 1, 1,
+	1, 1, 1, 0, 0, 0,
+	0, 0, 0, 0, 0, 0,
+	0, 0, 0, 0, 0, 0,
+	0, 0, 0, 0, 0, 0,
+
+	1, 1, 1, 1, 1, 1,
+	1, 1, 1, 1, 1, 1,
+	0, 0, 0, 0, 0, 0,
+	0, 0, 0, 0, 0, 0,
+	0, 0, 0, 0, 0, 0,
+	0, 0, 0, 0, 0, 0,
+
+	1, 1, 1, 1, 1, 1,
+	1, 1, 1, 1, 1, 1,
+	1, 1, 1, 0, 0, 0,
+	0, 0, 0, 0, 0, 0,
+	0, 0, 0, 0, 0, 0,
+	0, 0, 0, 0, 0, 0,
+
+	1, 1, 1, 1, 1, 1,
+	1, 1, 1, 1, 1, 1,
+	0, 0, 0, 0, 0, 0,
+	0, 0, 0, 0, 0, 0,
+	0, 0, 0, 0, 0, 0,
+	0, 0, 0, 0, 0, 0,
+
+	1, 1, 1, 1, 1, 1,
+	1, 1, 1, 1, 1, 1,
+	0, 0, 0, 0, 0, 0,
+	0, 0, 0, 0, 0, 0,
+	0, 0, 0, 0, 0, 0,
+	0, 0, 0, 0, 0, 0,
+
+	1, 1, 1, 1, 1, 1,
+	1, 1, 1, 1, 0, 0,
+	0, 0, 0, 0, 0, 0,
+	0, 0, 0, 0, 0, 0,
+	0, 0, 0, 0, 0, 0,
+	0, 0, 0, 0, 0, 0,
+
+	1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+};
+
 void term_write_msg(const msgbuf_t* msg, uint8_t flag) {
 	get_termsize(&width, &height);
 	bool_t use_utf8 = flag & FLAG_TERM_UTF8;
@@ -164,6 +215,21 @@ void term_write_msg(const msgbuf_t* msg, uint8_t flag) {
 	bool_t own = flag & FLAG_TERM_OWN;
 	bool_t show_group = flag & FLAG_TERM_SHOW_GROUP;
 	bool_t print_name = flag & FLAG_TERM_PRINT_NAME;
+
+	// decide on the colors
+	uint8_t fgc;
+	uint8_t bgc;
+	if(own) {
+		fgc = 7;
+		bgc = 4;
+	} else {
+		srand(msg->cid);
+		bgc = rand();
+		if(color_lookup[bgc])
+			fgc = 7;
+		else
+			fgc = 0;
+	}
 
 	// print the sender if needed
 	if(print_name) {
@@ -215,17 +281,6 @@ void term_write_msg(const msgbuf_t* msg, uint8_t flag) {
 	}
 	if(effective_width < in_row)
 		effective_width = in_row;
-
-	// decide on the colors
-	uint8_t fgc;
-	uint8_t bgc;
-	if(own) {
-		fgc = 7;
-		bgc = 4;
-	} else {
-		fgc = 0;
-		bgc = msg->cid % 256;
-	}
 
 	// actualy print the message
 	int rand_ind = rand()%MAX_RAND_IND;
