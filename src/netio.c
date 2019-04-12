@@ -28,9 +28,12 @@ error_t net_sendmsg(int sock, const msgbuf_t* msg) {
 		totallen += 4;		// <id><len>[~<ind>:KEY]<name>[@<group>][|ENT]\0
 	else if(msg->flag & FLAG_MSG_EXT)
 		totallen += 4;		// <id><len>[~<ind>:KEY]<name>[@<group>][|EXT]\0
-	else
+	else if(msg->flag & FLAG_MSG_IMG)
+			totallen += 4;		// <id><len>[~<ind>:KEY]<name>[@<group>][|IMG]\0
+
+	if(msg->data != NULL)
 		totallen += msg->data_len;	// <id><len>[~<ind>:KEY]<name>[@<group>][|TYP]\0[<data>]
-	
+
 	uint8_t* buffer = (uint8_t*)malloc(sizeof(id_t)+sizeof(len_t)+totallen+2*sizeof(data256_t)); // +2*sizeof(data256_t) to be sure everything fits even after encryption
 	len_t buflen = 0;
 	len_t enc_start;
@@ -57,6 +60,9 @@ error_t net_sendmsg(int sock, const msgbuf_t* msg) {
 		buflen += 4;
 	} else if(msg->flag & FLAG_MSG_EXT) /* add exit identifier */ {
 		memcpy(buffer+sizeof(id_t)+sizeof(len_t)+buflen, "|EXT", 4);
+		buflen += 4;
+	} else if(msg->flag & FLAG_MSG_IMG) /* add image identifier */ {
+		memcpy(buffer+sizeof(id_t)+sizeof(len_t)+buflen, "|IMG", 4);
 		buflen += 4;
 	}
 
@@ -161,19 +167,16 @@ error_t net_recvmsg(int sock, msgbuf_t* msg) {
 				} else
 					msg->group = NULL;
 
-				if(pipepos != -1 && strcmp(msgre+pipepos+1, "TYP") == 0) /* the message only contains typing information */ {
+				if(pipepos != -1 && strcmp(msgre+pipepos+1, "TYP") == 0) /* the message only contains typing information */
 					msg->flag |= FLAG_MSG_TYP;
-					msg->data_len = 0;
-					msg->data = NULL;
-				} else if(pipepos != -1 && strcmp(msgre+pipepos+1, "ENT") == 0) /* the message only contains enter information */ {
+				else if(pipepos != -1 && strcmp(msgre+pipepos+1, "ENT") == 0) /* the message only contains enter information */
 					msg->flag |= FLAG_MSG_ENT;
-					msg->data_len = 0;
-					msg->data = NULL;
-				} else if(pipepos != -1 && strcmp(msgre+pipepos+1, "EXT") == 0) /* the message only contains exit information */ {
+				else if(pipepos != -1 && strcmp(msgre+pipepos+1, "EXT") == 0) /* the message only contains exit information */
 					msg->flag |= FLAG_MSG_EXT;
-					msg->data_len = 0;
-					msg->data = NULL;
-				} else if(datalen == 0) {
+				else if(pipepos != -1 && strcmp(msgre+pipepos+1, "IMG") == 0) /* the message is a image */
+					msg->flag |= FLAG_MSG_IMG;
+				
+				if(datalen == 0) {
 					msg->data_len = 0;
 					msg->data = NULL;
 				} else {

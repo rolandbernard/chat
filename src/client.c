@@ -17,11 +17,15 @@
 #include "netio.h"
 #include "random.h"
 #include "hash.h"
+#include "image.h"
 
 #define TIMEOUT_SEC 2
 #define MAX_SEARCH_TRY 10
 #define START_BUFFER_LEN 1024
 #define CLIENT_CLOCK 100
+
+#define MAX_IMG_WIDTH 1024
+#define MAX_IMG_HEIGHT 1024
 
 error_t client_main(const config_t conf) {
 	bool_t use_dis = conf.flag & FLAG_CONF_AUTO_DIS;
@@ -257,7 +261,9 @@ error_t client_main(const config_t conf) {
 							gettimeofday(&last_status, NULL);
 							max_status_time_usec = 10000000;
 						}
-					} else if(msg.data != NULL) /* normal message */ {
+					}
+					
+					if(msg.data != NULL) /* normal message */ {
 						uint8_t flags =
 							(use_utf8 ? FLAG_TERM_UTF8 : 0) |
 							(ignore_breaking ? FLAG_TERM_IGN_BREAK : 0) |
@@ -312,6 +318,53 @@ error_t client_main(const config_t conf) {
 							buff_len++;
 						} else if(tmp_in[i] == 3 /* <C-c> */ || tmp_in[i] == 4 /* <C-D> */) {
 							end = 1;
+						} else if(tmp_in[i] == 1 /* <C-a> */) {
+							img_data_t img;
+							int n;
+							buffer[buff_len] = 0;
+							img.data = (uint8_t *)stbi_load(buffer, &(img.w), &(img.h), &n, 3);
+
+							if(img.data != NULL) {
+								int x = img.w;
+								int y = img.h;
+								while(x > MAX_IMG_WIDTH || y > MAX_IMG_HEIGHT) /* maximum size */ {
+									x >>= 1;
+									y >>= 1;
+								}
+								msgbuf_t msg;
+								msg.cid = id;
+								msg.name = conf.name;
+								msg.group = conf.group;
+								msg.data_len = 2*sizeof(int) + x*y*3; // size + with, height
+								msg.data = (char*)malloc(2*sizeof(int) + x*y*3);
+								for(int i = 0; i < sizeof(int); i++)
+									msg.data[i] = x >> 8*i;
+								for(int i = 0; i < sizeof(int); i++)
+									msg.data[i+sizeof(int)] = y >> 8*i;
+								for(int ix = 0; ix < x; ix++)
+									for(int iy = 0; iy < y; iy++) {
+										msg.data[2*sizeof(int)+3*(iy*x+ix)] = img.data[3*(iy*img.h/y*img.w+ix*img.w/x)];
+										msg.data[2*sizeof(int)+3*(iy*x+ix)+1] = img.data[3*(iy*img.h/y*img.w+ix*img.w/x)+1];
+										msg.data[2*sizeof(int)+3*(iy*x+ix)+2] = img.data[3*(iy*img.h/y*img.w+ix*img.w/x)+2];
+									}
+								msg.flag = (use_enc ? FLAG_MSG_ENC : 0) | FLAG_MSG_IMG;
+								if(use_enc) {
+									data256_t ind;
+									random_get(ind);
+									for(uint32_t j = 0; j < INDICATOR_LEN; j++)
+										msg.indicator[j] = 0;
+									for(uint32_t j = 0; j < sizeof(data256_t); j++)
+										msg.indicator[j%INDICATOR_LEN] ^= ind[j];
+									hash_sha512(msg.key, conf.passwd, strlen(conf.passwd));
+								}
+
+								net_sendmsg(sock, &msg);
+								stbi_image_free(img.data);
+								free(msg.data);
+							
+								buff_len = 0;
+								cursor_pos = 0;
+							}
 						} else if(tmp_in[i] == '\x1b') /* escape sequence */ {
 							i++;
 							if(tmp_in[i] == '[') {

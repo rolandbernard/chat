@@ -26,6 +26,7 @@ typedef uint8_t data512_t[64];
 #define FLAG_MSG_TYP 2
 #define FLAG_MSG_ENT 4
 #define FLAG_MSG_EXT 8
+#define FLAG_MSG_IMG 16
 
 typedef struct {
 	id_t cid;
@@ -60,5 +61,11 @@ typedef struct {
 	char* passwd;
 	uint16_t port;
 } config_t;
+
+typedef struct {
+	int w;
+	int h;
+	uint8_t* data;
+} img_data_t;
 
 #endif

@@ -1,8 +1,8 @@
 TARGET=chat
-OBJECTS=$(BUILD)/main.o $(BUILD)/cipher.o $(BUILD)/client.o $(BUILD)/hash.o\
+OBJECTS=$(BUILD)/main.o $(BUILD)/cipher.o $(BUILD)/client.o $(BUILD)/hash.o $(BUILD)/image.o\
 		$(BUILD)/netio.o $(BUILD)/random.o $(BUILD)/server.o $(BUILD)/termio.o
-LIBS=
-ARGS=-O3 -Wall
+LIBS=-lm
+ARGS=-g -Wall
 CLEAN=rm -f
 CC=gcc
 SRC=./src
@@ -34,6 +34,9 @@ $(BUILD)/hash.o: $(SRC)/hash.c $(SRC)/hash.h $(SRC)/types.h
 
 $(BUILD)/termio.o: $(SRC)/termio.c $(SRC)/termio.h $(SRC)/types.h
 	$(CC) -c -o $(BUILD)/termio.o $(ARGS) $(SRC)/termio.c
+
+$(BUILD)/image.o: $(SRC)/image.c $(SRC)/image.h
+	$(CC) -c -o $(BUILD)/image.o $(ARGS) $(SRC)/image.c
 
 clean:
 	$(CLEAN) $(OBJECTS)
