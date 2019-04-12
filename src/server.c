@@ -235,7 +235,7 @@ error_t server_main(config_t conf) {
 								}
 							}
 							// remove messages from history if needed
-							if(MAX_HISTORY_SAVE >= len)
+							if(MAX_HISTORY_SAVE >= len) {
 								while(history_len+len > MAX_HISTORY_SIZE) {
 									len_t len_first = 0;
 									for(uint32_t j = 0; j < sizeof(len_t); j++)
@@ -244,11 +244,12 @@ error_t server_main(config_t conf) {
 									memmove(history, history+sizeof(id_t)+sizeof(len_t)+len_first, history_len);
 									num_messg_hist--;
 								}
-							num_messg++;
-							num_messg_hist++;
-							// add data to history
-							memcpy(history+history_len, buffer, len);
-							history_len += len;
+								num_messg++;
+								num_messg_hist++;
+								// add data to history
+								memcpy(history+history_len, buffer, len);
+								history_len += len;
+							}
 						} else {
 							// disconnect client
 							num_clients_con--;
