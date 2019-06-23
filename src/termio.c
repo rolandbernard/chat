@@ -506,8 +506,6 @@ void term_write_msg(const msgbuf_t* msg, uint8_t flag) {
 				}
 			}
 		}
-
-		buffer[buffer_len++] = '\n';
 	}
 }
 
