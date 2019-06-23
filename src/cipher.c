@@ -5,7 +5,7 @@
 #include "cipher.h"
 #include "hash.h"
 
-#define CIPHER_ITER 16 // must be divisable by 2
+#define CIPHER_ITER 16
 
 static void cipher_apply(data512_t out, const data512_t in, const data512_t key, bool_t enc) {
 	data256_t tmp;
