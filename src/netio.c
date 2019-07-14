@@ -175,7 +175,7 @@ error_t net_recvmsg(int sock, msgbuf_t* msg) {
 					msg->flag |= FLAG_MSG_EXT;
 				else if(pipepos != -1 && strcmp(msgre+pipepos+1, "IMG") == 0) /* the message is a image */
 					msg->flag |= FLAG_MSG_IMG;
-				
+
 				if(datalen == 0) {
 					msg->data_len = 0;
 					msg->data = NULL;
