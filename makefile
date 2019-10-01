@@ -1,6 +1,6 @@
 TARGET=chat
 OBJECTS=$(BUILD)/main.o $(BUILD)/cipher.o $(BUILD)/client.o $(BUILD)/hash.o $(BUILD)/image.o\
-		$(BUILD)/netio.o $(BUILD)/random.o $(BUILD)/server.o $(BUILD)/termio.o
+	$(BUILD)/netio.o $(BUILD)/random.o $(BUILD)/server.o $(BUILD)/termio.o
 LIBS=-lm
 ARGS=-g -Wall
 CLEAN=rm -f
