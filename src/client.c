@@ -189,13 +189,8 @@ error_t client_main(const config_t conf) {
             msg.data = NULL;
             msg.flag = (use_enc ? FLAG_MSG_ENC : 0) | FLAG_MSG_ENT;
             if(use_enc) {
-                data256_t ind;
-                random_get(ind);
-                for(uint32_t j = 0; j < INDICATOR_LEN; j++)
-                    msg.indicator[j] = 0;
-                for(uint32_t j = 0; j < sizeof(data256_t); j++)
-                    msg.indicator[j%INDICATOR_LEN] ^= ind[j];
-                hash_sha512(msg.key, conf.passwd, strlen(conf.passwd));
+                hash_sha512(msg.key, (const uint8_t*)conf.passwd, strlen(conf.passwd));
+                hash_sha512(msg.ind, (const uint8_t*)conf.passwd, strlen(conf.passwd)-1);
             }
             net_sendmsg(sock, &msg);
         }
@@ -232,7 +227,7 @@ error_t client_main(const config_t conf) {
         if(listenfd[1].revents & POLLIN) {
             msgbuf_t msg;
             if(use_enc)
-                hash_sha512(msg.key, conf.passwd, strlen(conf.passwd));
+                hash_sha512(msg.key, (const uint8_t*)conf.passwd, strlen(conf.passwd));
             error_t ret = net_recvmsg(sock, &msg);
             if(ret == OK) {
                 if(!use_group || (msg.group != NULL && strcmp(msg.group, conf.group) == 0)) {
@@ -350,13 +345,8 @@ error_t client_main(const config_t conf) {
                                 }
                             msg.flag = (use_enc ? FLAG_MSG_ENC : 0) | FLAG_MSG_IMG;
                             if(use_enc) {
-                                data256_t ind;
-                                random_get(ind);
-                                for(uint32_t j = 0; j < INDICATOR_LEN; j++)
-                                    msg.indicator[j] = 0;
-                                for(uint32_t j = 0; j < sizeof(data256_t); j++)
-                                    msg.indicator[j%INDICATOR_LEN] ^= ind[j];
-                                hash_sha512(msg.key, conf.passwd, strlen(conf.passwd));
+                                hash_sha512(msg.key, (const uint8_t*)conf.passwd, strlen(conf.passwd));
+                                hash_sha512(msg.ind, (const uint8_t*)conf.passwd, strlen(conf.passwd)-1);
                             }
 
                             net_sendmsg(sock, &msg);
@@ -390,13 +380,8 @@ error_t client_main(const config_t conf) {
                             msg.data = buffer;
                             msg.flag = (use_enc ? FLAG_MSG_ENC : 0);
                             if(use_enc) {
-                                data256_t ind;
-                                random_get(ind);
-                                for(uint32_t j = 0; j < INDICATOR_LEN; j++)
-                                    msg.indicator[j] = 0;
-                                for(uint32_t j = 0; j < sizeof(data256_t); j++)
-                                    msg.indicator[j%INDICATOR_LEN] ^= ind[j];
-                                hash_sha512(msg.key, conf.passwd, strlen(conf.passwd));
+                                hash_sha512(msg.key, (const uint8_t*)conf.passwd, strlen(conf.passwd));
+                                hash_sha512(msg.ind, (const uint8_t*)conf.passwd, strlen(conf.passwd)-1);
                             }
 
                             net_sendmsg(sock, &msg);
@@ -440,13 +425,8 @@ error_t client_main(const config_t conf) {
                                 msg.data = NULL;
                                 msg.flag = (use_enc ? FLAG_MSG_ENC : 0) | FLAG_MSG_TYP;
                                 if(use_enc) {
-                                    data256_t ind;
-                                    random_get(ind);
-                                    for(uint32_t j = 0; j < INDICATOR_LEN; j++)
-                                        msg.indicator[j] = 0;
-                                    for(uint32_t j = 0; j < sizeof(data256_t); j++)
-                                        msg.indicator[j%INDICATOR_LEN] ^= ind[j];
-                                    hash_sha512(msg.key, conf.passwd, strlen(conf.passwd));
+                                    hash_sha512(msg.key, (const uint8_t*)conf.passwd, strlen(conf.passwd));
+                                    hash_sha512(msg.ind, (const uint8_t*)conf.passwd, strlen(conf.passwd)-1);
                                 }
                                 net_sendmsg(sock, &msg);
                             }
@@ -469,13 +449,8 @@ error_t client_main(const config_t conf) {
         msg.data = NULL;
         msg.flag = (use_enc ? FLAG_MSG_ENC : 0) | FLAG_MSG_EXT;
         if(use_enc) {
-            data256_t ind;
-            random_get(ind);
-            for(uint32_t j = 0; j < INDICATOR_LEN; j++)
-                msg.indicator[j] = 0;
-            for(uint32_t j = 0; j < sizeof(data256_t); j++)
-                msg.indicator[j%INDICATOR_LEN] ^= ind[j];
-            hash_sha512(msg.key, conf.passwd, strlen(conf.passwd));
+            hash_sha512(msg.key, (const uint8_t*)conf.passwd, strlen(conf.passwd));
+            hash_sha512(msg.ind, (const uint8_t*)conf.passwd, strlen(conf.passwd)-1);
         }
         net_sendmsg(sock, &msg);
     }

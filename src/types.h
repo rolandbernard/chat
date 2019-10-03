@@ -20,8 +20,6 @@ typedef uint8_t hash512_t[64];
 typedef uint8_t data256_t[32];
 typedef uint8_t data512_t[64];
 
-#define INDICATOR_LEN 32
-
 #define FLAG_MSG_ENC 1
 #define FLAG_MSG_TYP 2
 #define FLAG_MSG_ENT 4
@@ -29,14 +27,14 @@ typedef uint8_t data512_t[64];
 #define FLAG_MSG_IMG 16
 
 typedef struct {
-	id_t cid;
-	uint8_t flag;
-	char indicator[INDICATOR_LEN];
-	data512_t key;
-	char* name;		// username
-	char* group;	// groupname
-	len_t data_len;
-	char* data;
+    id_t cid;
+    uint8_t flag;
+    data512_t ind;
+    data512_t key;
+    char* name;        // username
+    char* group;    // groupname
+    len_t data_len;
+    char* data;
 } msgbuf_t;
 
 // settings flags
@@ -54,18 +52,18 @@ typedef struct {
 int strfndchr(const char* str, char c);
 
 typedef struct {
-	uint32_t flag;
-	char* name;
-	char* group;
-	char* host;
-	char* passwd;
-	uint16_t port;
+    uint32_t flag;
+    char* name;
+    char* group;
+    char* host;
+    char* passwd;
+    uint16_t port;
 } config_t;
 
 typedef struct {
-	int w;
-	int h;
-	uint8_t* data;
+    int w;
+    int h;
+    uint8_t* data;
 } img_data_t;
 
 #endif

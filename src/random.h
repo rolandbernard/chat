@@ -10,4 +10,6 @@ void random_seed_unix_urandom();
 
 void random_get(data256_t ret);
 
+void random_get512(data512_t ret);
+
 #endif
