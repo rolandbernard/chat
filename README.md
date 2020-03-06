@@ -29,5 +29,9 @@ Options for clients:
   does not support certain features
 ```
 
+The program looks something like this:
+
+![Screenshot](img/screenshot.png)
+
 ---
 ###### Copyright (c) 2019 Roland Bernard
